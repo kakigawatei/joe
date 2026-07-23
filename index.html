@@ -113,6 +113,15 @@
   .flash .f .l{font-size:11.5px;color:var(--muted);font-weight:700;}
   .flash .f .v{font-size:17px;font-weight:800;}
 
+  /* ジョーの一言（数字連動リアクション） */
+  .joe-greet{display:flex;align-items:center;gap:11px;padding:11px 13px;margin-top:12px;}
+  .joe-face{width:58px;height:58px;object-fit:contain;flex-shrink:0;}
+  .joe-bubble{position:relative;flex:1;background:color-mix(in srgb,var(--accent) 9%, var(--panel));
+    border:1px solid var(--line);border-radius:14px;padding:10px 13px;font-size:13.5px;font-weight:700;line-height:1.5;}
+  .joe-bubble::before{content:"";position:absolute;left:-7px;top:20px;border:7px solid transparent;border-right-color:var(--line);}
+  .joe-bubble::after{content:"";position:absolute;left:-5px;top:20px;border:7px solid transparent;
+    border-right-color:color-mix(in srgb,var(--accent) 9%, var(--panel));}
+  .joe-bubble .note{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-top:3px;}
   .foot{text-align:center;color:var(--muted);font-size:11px;margin-top:18px;line-height:1.7;}
   .loading{color:var(--muted);font-size:13px;padding:40px 0;text-align:center;}
   .err{color:var(--bad);font-size:12.5px;padding:14px;text-align:center;}
@@ -150,6 +159,11 @@
 <main id="app">
   <div class="loading" id="loading">📊 データを読み込んでいます…</div>
   <div id="content" style="display:none;">
+    <!-- ジョーの一言 -->
+    <div class="card joe-greet">
+      <img class="joe-face" id="joe-face" src="assets/joe.png" alt="ジョー">
+      <div class="joe-bubble" id="joe-say">…</div>
+    </div>
     <!-- hero -->
     <div class="grid">
       <div class="card hero">
@@ -330,6 +344,8 @@ function render(){
     : '経費データ未入力';
   elt("k1-s").textContent=""; elt("k2-s").textContent="";
 
+  /* ジョーの一言（今月の状態に連動） */
+  joeReact(rieki, monthTotals.uriage, mo.jinken);
   /* channel */
   renderChannel(monthTotals);
   /* trend */
@@ -340,6 +356,20 @@ function render(){
   elt("foot").innerHTML = DATA.label+"のデータ／元シートと自動同期（5分毎）<br>数値は元スプレッドシートに準拠。簡易利益・経費は月次集計タブ基準。";
 }
 
+function joeReact(rieki, uriage, jinken){
+  var face="joe", say="";
+  if(uriage<=0){ face="joe"; say="このお店は今月のデータがまだ無いみたい。入力されたらここで一緒に見ていこう。"; }
+  else if(rieki<0){ face="joe_worry"; say="今月は赤字…。どこを締められるか一緒に見ていこう。"; }
+  else {
+    var m = rieki/uriage*100;
+    if(m>=40){ face="joe_glad"; say="絶好調！利益しっかり出てるよ🎉 この調子でいこう！"; }
+    else if(m>=15){ face="joe_happy"; say="今月は黒字、いい調子だね！このまま積み上げよう。"; }
+    else { face="joe_shock"; say="黒字だけど利益は薄めかも。経費（仕入・人件費）をチェックしてみよう。"; }
+  }
+  var note = (uriage>0 && jinken<=0) ? '<span class="note">※人件費が未入力です。入力すると利益がより正確になるよ。</span>' : '';
+  var f=elt("joe-face"); if(f) f.src="assets/"+face+".png";
+  var s=elt("joe-say"); if(s) s.innerHTML=say+note;
+}
 function renderChannel(t){
   var chs=[
     {n:"券売機", v:t.kenbai, c:"var(--ch1)"},
@@ -421,6 +451,8 @@ function load(force){
 
 /* ===== 起動 ===== */
 (function(){
+  // 表情プリロード（切替時のちらつき防止）
+  ["joe_happy","joe_glad","joe_worry","joe_shock"].forEach(function(n){ var im=new Image(); im.src="assets/"+n+".png"; });
   // キャッシュ即表示
   try{ var c=JSON.parse(localStorage.getItem(LS_KEY)||"null"); if(c&&c.d){ applyData(c.d); setSync("ok","前回の数字を表示中…"); } }catch(e){}
   load();
