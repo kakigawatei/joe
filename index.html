@@ -38,7 +38,7 @@
   html,body{background:var(--bg);color:var(--ink);overflow-x:hidden;
     font-family:system-ui,-apple-system,"Segoe UI","Hiragino Kaku Gothic ProN",sans-serif;
     -webkit-font-smoothing:antialiased;}
-  body{max-width:1120px;margin:0 auto;padding:0 14px calc(28px + env(safe-area-inset-bottom,0px));}
+  body{max-width:1120px;margin:0 auto;padding:0 14px calc(84px + env(safe-area-inset-bottom,0px));}
   .tnum{font-variant-numeric:tabular-nums;}
 
   /* header */
@@ -127,6 +127,33 @@
   .err{color:var(--bad);font-size:12.5px;padding:14px;text-align:center;}
   svg{display:block;width:100%;overflow:visible;}
   .axis{fill:var(--muted);font-size:10px;} .gridline{stroke:var(--line);stroke-width:1;}
+
+  /* 下部ナビ＋画面切替 */
+  .bottomnav{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;justify-content:center;gap:6px;
+    background:color-mix(in srgb,var(--panel) 92%, transparent);backdrop-filter:blur(8px);
+    border-top:1px solid var(--line);padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px));}
+  .bottomnav button{flex:0 1 180px;background:none;border:0;color:var(--muted);font-family:inherit;font-weight:700;
+    font-size:11px;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;padding:4px 0;border-radius:10px;}
+  .bottomnav button .ic{font-size:19px;line-height:1;}
+  .bottomnav button.on{color:var(--accent);}
+  /* コスト画面 */
+  .cost-sum{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  @media(min-width:760px){ .cost-sum{grid-template-columns:repeat(4,1fr);} }
+  .cost-sum .cs{background:color-mix(in srgb,var(--accent) 5%, var(--panel));border:1px solid var(--line);border-radius:11px;padding:11px 12px;}
+  .cost-sum .cs .l{font-size:11.5px;color:var(--muted);font-weight:700;}
+  .cost-sum .cs .v{font-size:21px;font-weight:800;margin-top:4px;}
+  .cost-sum .cs .v.pos{color:var(--good);} .cost-sum .cs .v.neg{color:var(--bad);}
+  .stack{display:flex;height:26px;border-radius:8px;overflow:hidden;margin-bottom:8px;}
+  .stack span{display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:800;min-width:2px;}
+  .stack-legend{display:flex;gap:16px;font-size:12px;color:var(--muted);font-weight:700;}
+  .stack-legend .lg{display:flex;align-items:center;gap:6px;} .stack-legend .d{width:11px;height:11px;border-radius:3px;}
+  .rank-row{margin-bottom:11px;} .rank-row:last-child{margin-bottom:0;}
+  .rank-head{display:flex;font-size:12.5px;margin-bottom:4px;gap:8px;}
+  .rank-name{color:var(--ink);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .rank-val{margin-left:auto;font-weight:800;white-space:nowrap;flex-shrink:0;}
+  .rank-track{height:9px;background:var(--line);border-radius:99px;overflow:hidden;}
+  .rank-fill{display:block;height:100%;border-radius:99px;background:var(--accent);min-width:2px;}
+  .empty-note{color:var(--muted);font-size:12.5px;padding:6px 0;line-height:1.6;}
 </style>
 </head>
 <body>
@@ -159,6 +186,7 @@
 <main id="app">
   <div class="loading" id="loading">📊 データを読み込んでいます…</div>
   <div id="content" style="display:none;">
+   <div id="screen-home">
     <!-- ジョーの一言 -->
     <div class="card joe-greet">
       <img class="joe-face" id="joe-face" src="assets/joe.png" alt="ジョー">
@@ -191,6 +219,13 @@
         <div id="channel"></div>
       </div>
     </div>
+    <!-- 曜日別 -->
+    <div class="grid">
+      <div class="card">
+        <h2>曜日別の平均売上（今月）</h2>
+        <div id="dow"></div>
+      </div>
+    </div>
     <!-- flash -->
     <div class="grid">
       <div class="card">
@@ -199,9 +234,22 @@
       </div>
     </div>
     <div class="foot" id="foot"></div>
+   </div><!-- /screen-home -->
+
+   <div id="screen-cost" style="display:none;">
+    <div class="card"><h2>今月の損益（<span id="cost-store">全店</span>）</h2><div class="cost-sum" id="cost-summary"></div></div>
+    <div class="card"><h2>経費の内訳（仕入 vs 人件費）</h2><div id="cost-breakdown"></div></div>
+    <div class="card"><h2>仕入先・費目 別ランキング（税込）</h2><div id="cost-vendors"></div></div>
+    <div class="card"><h2>人件費</h2><div id="cost-labor"></div></div>
+    <div class="foot" id="foot2"></div>
+   </div><!-- /screen-cost -->
   </div>
   <div class="err" id="err" style="display:none;"></div>
 </main>
+<nav class="bottomnav" id="bottomnav">
+  <button data-screen="home" class="on"><span class="ic">🏠</span>ホーム</button>
+  <button data-screen="cost"><span class="ic">💰</span>コスト・利益</button>
+</nav>
 
 <script>
 /* ===== 設定：月ごとにシートが変わる想定。新しい月はここに1行足すだけ ===== */
@@ -239,8 +287,36 @@ function fetchMonth(sheet){
   return Promise.all([
     fetchTab(sheet.id,"日次_柿川亭"),
     fetchTab(sheet.id,"日次_アブララボ"),
-    fetchTab(sheet.id,"月次集計")
-  ]).then(function(a){ return { ym:sheet.ym, label:sheet.label, kaki:a[0], abura:a[1], monthly:a[2] }; });
+    fetchTab(sheet.id,"月次集計"),
+    fetchTab(sheet.id,"仕入経費").catch(function(){return[];}),
+    fetchTab(sheet.id,"人件費").catch(function(){return[];})
+  ]).then(function(a){ return { ym:sheet.ym, label:sheet.label, kaki:a[0], abura:a[1], monthly:a[2], shiire:a[3], jinken:a[4] }; });
+}
+/* 仕入経費パース → [{date,store,vendor,zeikomi}] */
+function parseShiire(rows){
+  if(!rows||!rows.length) return [];
+  var h=rows[0];
+  var iSt=colIdx(h,"店舗"), iVen=colIdx(h,"仕入先"), iZk=colIdx(h,"税込金額");
+  var out=[];
+  for(var r=1;r<rows.length;r++){ var row=rows[r]; var d=(row[0]||"").trim();
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+    out.push({ date:d, store:(row[iSt]||"").trim(), vendor:(row[iVen]||"その他").trim(), zeikomi:num(row[iZk]) });
+  }
+  return out;
+}
+/* 人件費パース → [{date,store,name,hours,cost}] */
+function parseJinken(rows){
+  if(!rows||!rows.length) return [];
+  // ヘッダー行を探す（「氏名」を含む行）
+  var hi=-1; for(var i=0;i<rows.length;i++){ if((rows[i]||[]).some(function(c){return (c||"").indexOf("氏名")>=0;})){ hi=i; break; } }
+  if(hi<0) return [];
+  var h=rows[hi], iSt=colIdx(h,"店舗"), iNm=colIdx(h,"氏名"), iHr=colIdx(h,"勤務時間"), iCost=colIdx(h,"人件費");
+  var out=[];
+  for(var r=hi+1;r<rows.length;r++){ var row=rows[r]; var d=(row[0]||"").trim();
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+    out.push({ date:d, store:(row[iSt]||"").trim(), name:(row[iNm]||"").trim(), hours:num(row[iHr]), cost:num(row[iCost]) });
+  }
+  return out;
 }
 
 /* ===== 日次パース → [{date,dow,kenbai,anydeli,coupon,tsuhan,uriage,kyaku}] ===== */
@@ -286,7 +362,10 @@ function mergeDaily(kaki, abura){
 function sumRange(daily, keys){ var o={}; keys.forEach(function(k){o[k]=0;}); daily.forEach(function(d){ keys.forEach(function(k){o[k]+=d[k];}); }); return o; }
 
 /* ===== 状態 ===== */
-var STORE="all", PERIOD="month", DATA=null;
+var STORE="all", PERIOD="month", SCREEN="home", DATA=null;
+var STORE_LABEL={all:"全店",kaki:"柿川亭",abura:"アブララボ"};
+function shiireFor(store){ var l=parseShiire(DATA.shiire); return store==="all"?l:l.filter(function(x){return x.store===STORE_LABEL[store];}); }
+function jinkenFor(store){ var l=parseJinken(DATA.jinken); return store==="all"?l:l.filter(function(x){return x.store===STORE_LABEL[store];}); }
 
 function dailyFor(store){
   if(store==="kaki") return parseDaily(DATA.kaki);
@@ -350,10 +429,96 @@ function render(){
   renderChannel(monthTotals);
   /* trend */
   elt("trend").innerHTML=lineChart(daily);
+  /* 曜日別 */
+  renderDow(daily);
   /* flash */
   renderFlash(daily);
+  /* コスト画面 */
+  renderCost(mo, monthTotals.uriage);
 
   elt("foot").innerHTML = DATA.label+"のデータ／元シートと自動同期（5分毎）<br>数値は元スプレッドシートに準拠。簡易利益・経費は月次集計タブ基準。";
+}
+
+/* 曜日別 平均売上 */
+function renderDow(daily){
+  var order=["月","火","水","木","金","土","日"];
+  var agg={}; order.forEach(function(d){agg[d]={sum:0,n:0};});
+  daily.forEach(function(d){ if((d.uriage>0)&&agg[d.dow]){ agg[d.dow].sum+=d.uriage; agg[d.dow].n++; } });
+  var vals=order.map(function(d){ return agg[d].n?agg[d].sum/agg[d].n:0; });
+  var mx=Math.max.apply(null,vals.concat([1]));
+  var W=520,H=150,pad={l:6,r:6,t:10,b:22}, iw=W-pad.l-pad.r, ih=H-pad.t-pad.b;
+  var bw=iw/order.length*0.62, gap=iw/order.length;
+  var bars=order.map(function(d,i){
+    var v=vals[i], h=v/mx*ih, x=pad.l+i*gap+(gap-bw)/2, y=pad.t+ih-h;
+    var wk=(d==="土"||d==="日");
+    return '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+Math.max(0,h).toFixed(1)+'" rx="3" fill="var(--accent)" opacity="'+(wk?1:0.55)+'"/>'+
+      '<text class="axis" x="'+(x+bw/2).toFixed(1)+'" y="'+(pad.t+ih+15)+'" text-anchor="middle">'+d+'</text>'+
+      (v>0?'<text class="axis" x="'+(x+bw/2).toFixed(1)+'" y="'+(y-4).toFixed(1)+'" text-anchor="middle" style="font-size:9px">'+Math.round(v/1000)+'k</text>':'');
+  }).join("");
+  elt("dow").innerHTML='<svg viewBox="0 0 '+W+' '+H+'" style="height:150px">'+bars+'</svg>'+
+    '<div class="empty-note" style="padding-top:4px">土日は濃色。1日あたりの平均売上（データのある日で算出）。</div>';
+}
+
+/* コスト・利益画面 */
+function renderCost(mo, uriage){
+  elt("cost-store").textContent=STORE_LABEL[STORE];
+  var rieki=mo.rieki, ritsu=uriage>0?rieki/uriage*100:0, keihiRitsu=uriage>0?mo.sokei/uriage*100:0;
+  elt("cost-summary").innerHTML=
+    cs("売上",yen(uriage))+cs("総経費",yen(mo.sokei))+
+    cs("簡易利益",(rieki<0?"−":"")+yen(Math.abs(rieki)),rieki>=0?"pos":"neg")+
+    cs("利益率",(uriage>0?ritsu.toFixed(1)+"%":"—"));
+  function cs(l,v,cls){ return '<div class="cs"><div class="l">'+l+'</div><div class="v'+(cls?" "+cls:"")+' tnum">'+v+'</div></div>'; }
+
+  /* 経費構成 仕入 vs 人件費 */
+  var shi=mo.shiire, jin=mo.jinken, tot=shi+jin;
+  if(tot>0){
+    var ps=shi/tot*100, pj=jin/tot*100;
+    elt("cost-breakdown").innerHTML=
+      '<div class="stack">'+
+        '<span style="width:'+ps.toFixed(1)+'%;background:var(--ch1)">'+(ps>12?"仕入 "+ps.toFixed(0)+"%":"")+'</span>'+
+        '<span style="width:'+pj.toFixed(1)+'%;background:var(--ch3)">'+(pj>12?"人件費 "+pj.toFixed(0)+"%":"")+'</span>'+
+      '</div>'+
+      '<div class="stack-legend"><span class="lg"><span class="d" style="background:var(--ch1)"></span>仕入 '+yen(shi)+'</span>'+
+      '<span class="lg"><span class="d" style="background:var(--ch3)"></span>人件費 '+yen(jin)+'</span></div>'+
+      '<div class="empty-note">売上に対する総経費率：'+(uriage>0?keihiRitsu.toFixed(1)+"%":"—")+'</div>';
+  } else { elt("cost-breakdown").innerHTML='<div class="empty-note">経費データがまだありません。</div>'; }
+
+  /* 仕入先ランキング */
+  var sh=shiireFor(STORE), vend={};
+  sh.forEach(function(x){ vend[x.vendor]=(vend[x.vendor]||0)+x.zeikomi; });
+  var arr=Object.keys(vend).map(function(k){return {name:k,v:vend[k]};}).sort(function(a,b){return b.v-a.v;});
+  if(arr.length){
+    var top=arr.slice(0,8), etc=arr.slice(8).reduce(function(s,x){return s+x.v;},0);
+    if(etc>0) top.push({name:"その他",v:etc});
+    var mx=top[0].v||1;
+    elt("cost-vendors").innerHTML=top.map(function(x){ var p=x.v/mx*100;
+      return '<div class="rank-row"><div class="rank-head"><span class="rank-name">'+x.name+'</span><span class="rank-val tnum">'+yen(x.v)+'</span></div>'+
+        '<div class="rank-track"><span class="rank-fill" style="width:'+p.toFixed(1)+'%"></span></div></div>';
+    }).join("");
+  } else { elt("cost-vendors").innerHTML='<div class="empty-note">仕入・経費の明細がまだありません。</div>'; }
+
+  /* 人件費（スタッフ別） */
+  var jk=jinkenFor(STORE), staff={}, jtot=0, htot=0;
+  jk.forEach(function(x){ staff[x.name]=staff[x.name]||{cost:0,hours:0}; staff[x.name].cost+=x.cost; staff[x.name].hours+=x.hours; jtot+=x.cost; htot+=x.hours; });
+  var names=Object.keys(staff).filter(function(n){return n;}).sort(function(a,b){return staff[b].cost-staff[a].cost;});
+  if(names.length){
+    var mxc=staff[names[0]].cost||1;
+    elt("cost-labor").innerHTML=
+      '<div class="empty-note" style="padding-top:0">合計 '+yen(jtot)+'（'+htot.toFixed(1)+'時間）</div>'+
+      names.map(function(n){ var p=staff[n].cost/mxc*100;
+        return '<div class="rank-row"><div class="rank-head"><span class="rank-name">'+n+'</span><span class="rank-val tnum">'+yen(staff[n].cost)+' <span class="ch-pct">'+staff[n].hours.toFixed(1)+'h</span></span></div>'+
+          '<div class="rank-track"><span class="rank-fill" style="width:'+p.toFixed(1)+'%"></span></div></div>';
+      }).join("");
+  } else { elt("cost-labor").innerHTML='<div class="empty-note">人件費（タイムカード）がまだ入力されていません。入力すると利益率・人件費率がここに出ます。</div>'; }
+
+  elt("foot2").innerHTML = DATA.label+"のデータ／損益・経費は月次集計＋各明細タブに準拠。";
+}
+function showScreen(name){
+  SCREEN=name;
+  elt("screen-home").style.display = name==="home"?"block":"none";
+  elt("screen-cost").style.display = name==="cost"?"block":"none";
+  [].forEach.call(document.getElementById("bottomnav").children,function(b){ b.classList.toggle("on", b.dataset.screen===name); });
+  window.scrollTo(0,0);
 }
 
 function joeReact(rieki, uriage, jinken){
@@ -466,6 +631,8 @@ function load(force){
     STORE=b.dataset.store; [].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});
     document.documentElement.style.setProperty("--accent", STORE==="abura"?"var(--abura)":"var(--kaki)");
     render(); });
+  // 画面切替（下部ナビ）
+  elt("bottomnav").addEventListener("click",function(e){ var b=e.target.closest("button"); if(!b)return; showScreen(b.dataset.screen); });
   // 同期ボタン
   elt("sync").addEventListener("click",function(){ load(true); });
   // テーマ
