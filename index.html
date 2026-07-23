@@ -419,6 +419,8 @@ function render(){
   elt("k1-v").textContent=yen(pTotals.uriage); elt("k1-v").className="k-val tnum";
   elt("k2-l").textContent=pLabel+" 客数";
   elt("k2-v").textContent=ppl(pTotals.kyaku); elt("k2-v").className="k-val tnum";
+  var pDays = pr.filter(function(d){return d.uriage>0||d.kyaku>0;}).length;
+  var avgKyaku = pDays? pTotals.kyaku/pDays : 0;
   var tanka = pTotals.kyaku>0 ? pTotals.uriage/pTotals.kyaku : 0;
   elt("k3-v").textContent=yen(tanka); elt("k3-v").className="k-val tnum";
   elt("k3-s").textContent=pLabel+"（売上÷客数）";
@@ -427,7 +429,8 @@ function render(){
   elt("k4-s").innerHTML = keihiRitsu>0
     ? '仕入 '+yen(mo.shiire)+' ＋ 人件費 '+yen(mo.jinken)
     : '経費データ未入力';
-  elt("k1-s").textContent=""; elt("k2-s").textContent="";
+  elt("k1-s").textContent="";
+  elt("k2-s").textContent = pDays ? ("1日平均 "+Math.round(avgKyaku)+"人（"+pDays+"日）") : "";
 
   /* ジョーの一言（今月の状態に連動） */
   joeReact(rieki, monthTotals.uriage, mo.jinken);
