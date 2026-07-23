@@ -266,6 +266,14 @@ var CURRENT = SHEETS[SHEETS.length-1];               // 表示対象＝最新月
 var PREV = SHEETS.length>=2 ? SHEETS[SHEETS.length-2] : null;
 var LS_KEY = "joe_cache_v1";
 var POLL_MS = 5*60*1000;
+// タブ名（Codexが入力UX改善で絵文字付きに改名したのに合わせる。※名前が変わったらここだけ直せばよい）
+var TABS = {
+  kaki:   "🍜日次:柿川亭",
+  abura:  "🧴日次:アブラボ",
+  monthly:"月次集計",
+  shiire: "🧾仕入経費",
+  jinken: "👤人件費"
+};
 
 /* ===== ユーティリティ ===== */
 function gvizUrl(id, tab){ return "https://docs.google.com/spreadsheets/d/"+id+"/gviz/tq?tqx=out:csv&sheet="+encodeURIComponent(tab); }
@@ -291,11 +299,11 @@ function fetchTab(id, tab){
 }
 function fetchMonth(sheet){
   return Promise.all([
-    fetchTab(sheet.id,"日次_柿川亭"),
-    fetchTab(sheet.id,"日次_アブララボ"),
-    fetchTab(sheet.id,"月次集計"),
-    fetchTab(sheet.id,"仕入経費").catch(function(){return[];}),
-    fetchTab(sheet.id,"人件費").catch(function(){return[];})
+    fetchTab(sheet.id,TABS.kaki),
+    fetchTab(sheet.id,TABS.abura),
+    fetchTab(sheet.id,TABS.monthly),
+    fetchTab(sheet.id,TABS.shiire).catch(function(){return[];}),
+    fetchTab(sheet.id,TABS.jinken).catch(function(){return[];})
   ]).then(function(a){ return { ym:sheet.ym, label:sheet.label, kaki:a[0], abura:a[1], monthly:a[2], shiire:a[3], jinken:a[4] }; });
 }
 /* 仕入経費パース → [{date,store,vendor,zeikomi}] */
@@ -325,24 +333,24 @@ function parseJinken(rows){
   return out;
 }
 
-/* ===== 日次パース → [{date,dow,kenbai,anydeli,coupon,tsuhan,uriage,kyaku}] ===== */
+/* ===== 日次パース → [{date,dow,kenbai,anydeli,coupon,tsuhan,uriage,kyaku}] =====
+   日次シートは列順が固定（0日付/1曜日/2券売機売上/3anydeli売上/4クーポン枚数/5クーポン売上/
+   6通販・その他/7売上合計/8券売機杯数/9anydeli換算/10クーポン換算/11推定来店客数…）。
+   シート改善で見出し行が多重ラベル化して名前検出が壊れたため、固定列インデックスで読む。
+   日付でない行（見出し・月次小計）はスキップ。逆順で入っていても昇順に並べ直す。 */
 function parseDaily(rows){
   if(!rows||!rows.length) return [];
-  var h=rows[0];
-  var iDate=0,
-      iKen=colIdx(h,"券売機売上"), iAny=colIdx(h,"anydeli売上"),
-      iCpn=colIdx(h,"クーポン売上"), iTsu=colIdx(h,"通販"),
-      iUri=colIdx(h,"売上合計"), iKyaku=colIdx(h,"推定来店客数"), iDow=1;
   var out=[];
   for(var r=1;r<rows.length;r++){
-    var row=rows[r]; var d=(row[iDate]||"").trim();
+    var row=rows[r]; var d=(row[0]||"").trim();
     if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
     out.push({
-      date:d, dow:(row[iDow]||"").trim(),
-      kenbai:num(row[iKen]), anydeli:num(row[iAny]), coupon:num(row[iCpn]), tsuhan:num(row[iTsu]),
-      uriage:num(row[iUri]), kyaku:num(row[iKyaku])
+      date:d, dow:(row[1]||"").trim(),
+      kenbai:num(row[2]), anydeli:num(row[3]), coupon:num(row[5]), tsuhan:num(row[6]),
+      uriage:num(row[7]), kyaku:num(row[11])
     });
   }
+  out.sort(function(a,b){ return a.date<b.date?-1:(a.date>b.date?1:0); });
   return out;
 }
 /* 月次集計パース → {label:{kaki,abura,all}} */
