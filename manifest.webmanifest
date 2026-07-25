@@ -1,6 +1,6 @@
 {
-  "name": "ジョー｜経営ダッシュボード",
-  "short_name": "ジョー",
+  "name": "ジョー（会計係）｜経営ダッシュボード",
+  "short_name": "ジョー（会計係）",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
