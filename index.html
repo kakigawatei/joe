@@ -388,7 +388,14 @@ function dailyFor(store){
 }
 function monthlyFor(store){ var m=parseMonthly(DATA.monthly);
   var pick=function(o){ return store==="kaki"?o.kaki:store==="abura"?o.abura:o.all; };
-  return { shiire:pick(m.shiire), jinken:pick(m.jinken), sokei:pick(m.sokei), rieki:pick(m.rieki) };
+  var shiire = pick(m.shiire);   // 月次集計「仕入・経費（税込）」
+  // 人件費は月次集計に独立行が無い（v2）ので人件費タブから集計。未入力なら0。
+  // ※find("人件費")は「簡易利益（…人件費除く）」行を誤ヒットするため使わない。
+  var jinken = jinkenFor(store).reduce(function(s,x){ return s + (x.cost||0); }, 0);
+  var sokei = shiire + jinken;   // 総経費＝仕入経費＋人件費（月次に総経費行が無いので計算）
+  // シートの簡易利益は「売上−仕入経費（人件費除く）」。人件費が入力済みならさらに差し引く。
+  var rieki = pick(m.rieki) - jinken;
+  return { shiire:shiire, jinken:jinken, sokei:sokei, rieki:rieki };
 }
 function periodRows(daily){
   var withData = daily.filter(function(d){ return d.uriage>0 || d.kyaku>0; });
