@@ -174,7 +174,24 @@
   .stgrand .stname{font-size:15px;} .stgrand .sttot{margin-top:0;}
   .strow.clk{cursor:pointer;} .strow.clk:active{opacity:.6;}
   .stchev{margin-left:auto;color:var(--muted);font-weight:800;font-size:18px;}
-  .backbtn{background:none;border:0;color:var(--accent);font-family:inherit;font-weight:800;font-size:14px;cursor:pointer;padding:4px 0 10px;}
+  .backbtn{background:var(--line);border:0;color:var(--ink);font-family:inherit;font-weight:800;font-size:13px;cursor:pointer;padding:9px 16px;border-radius:99px;margin-bottom:12px;}
+  .backbtn:active{opacity:.6;}
+  .seg{display:inline-flex;background:var(--line);border-radius:99px;padding:3px;margin-bottom:12px;}
+  .seg button{border:0;background:none;font-family:inherit;font-weight:800;font-size:13px;color:var(--muted);padding:7px 20px;border-radius:99px;cursor:pointer;}
+  .seg button.on{background:var(--panel);color:var(--accent);}
+  .daynav{display:flex;align-items:center;justify-content:center;gap:14px;margin:8px 0 2px;}
+  .daynav .arw{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--panel);font-size:22px;font-weight:800;color:var(--accent);cursor:pointer;}
+  .daynav .arw:disabled{color:var(--line);cursor:default;}
+  .daynav .dlab{font-size:18px;font-weight:800;min-width:150px;text-align:center;}
+  .todaybtn{display:block;margin:2px auto 4px;background:none;border:0;color:var(--accent);font-weight:800;font-size:12px;cursor:pointer;}
+  .chips{display:flex;gap:7px;overflow-x:auto;padding:2px 0 10px;-webkit-overflow-scrolling:touch;}
+  .chip{flex:0 0 auto;border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:7px 13px;font-size:12.5px;font-weight:800;color:var(--muted);cursor:pointer;white-space:nowrap;}
+  .chip.on{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .dayrow{display:flex;align-items:center;justify-content:space-between;padding:12px 2px;border-bottom:1px solid var(--line);}
+  .dayrow:last-child{border-bottom:0;}
+  .dayrow .n{font-weight:800;font-size:14px;display:flex;align-items:center;gap:7px;}
+  .dayrow .v{font-weight:800;font-size:18px;} .dayrow .v.none{color:var(--muted);font-weight:600;font-size:13px;}
+  .dvals{margin-top:10px;} .dv-row{display:flex;justify-content:space-between;padding:10px 2px;border-bottom:1px solid var(--line);font-size:15px;} .dv-row:last-child{border-bottom:0;} .dv-row b{font-weight:800;font-size:17px;}
   .sd-delta{font-size:13px;font-weight:800;} .sd-delta.pos{color:var(--good);} .sd-delta.neg{color:var(--bad);}
   .sd-split{display:flex;gap:12px;margin-top:6px;} .sd-split .b{flex:1;background:color-mix(in srgb,var(--accent) 5%, var(--panel));border:1px solid var(--line);border-radius:11px;padding:10px 12px;}
   .sd-split .l{font-size:11.5px;color:var(--muted);font-weight:700;} .sd-split .v{font-size:19px;font-weight:800;margin-top:3px;}
@@ -625,12 +642,17 @@ function colSeries(rows){
   }
   return out;
 }
+function summarizeDays(days){
+  var storeTotal=0,delivTotal=0,latestDay=0,latestTotal=0;
+  days.forEach(function(x){ storeTotal+=x.store; delivTotal+=x.deliv; if(x.total>0 && x.day>latestDay){ latestDay=x.day; latestTotal=x.total; } });
+  var total=storeTotal+delivTotal;
+  return { total:total, storeTotal:storeTotal, delivTotal:delivTotal, daysCount:days.length, latestDay:latestDay, latestTotal:latestTotal, noData:total<=0 };
+}
 function fetchStoreDetail(store){
   if(store.adapter==="joe"){
     return fetchTab(CURRENT.id, store.tab).then(parseDaily).then(function(days){
       var arr=days.map(function(d){ return {day:parseInt(d.date.slice(8),10), store:d.uriage-d.anydeli, deliv:d.anydeli, total:d.uriage}; }).filter(function(x){return x.total>0;});
-      var st=0,dv=0; arr.forEach(function(x){st+=x.store;dv+=x.deliv;});
-      return { name:store.name, kind:store.kind, days:arr, curTotal:st+dv, prevTotal:null, storeTotal:st, delivTotal:dv };
+      var s=summarizeDays(arr); s.name=store.name; s.kind=store.kind; s.days=arr; s.prevTotal=null; return s;
     });
   }
   var jobs=[ fetchTab(store.sheetId, store.storeTab) ];
@@ -643,9 +665,9 @@ function fetchStoreDetail(store){
     if(curS) for(var d in curS.byDay){ (dm[d]=dm[d]||{store:0,deliv:0}).store=curS.byDay[d]; }
     if(curD) for(var d in curD.byDay){ (dm[d]=dm[d]||{store:0,deliv:0}).deliv=curD.byDay[d]; }
     var arr=Object.keys(dm).map(function(d){ return {day:+d, store:dm[d].store||0, deliv:dm[d].deliv||0, total:(dm[d].store||0)+(dm[d].deliv||0)}; }).sort(function(a,b){return a.day-b.day;});
-    var st=curS?curS.sum:0, dv=curD?curD.sum:0;
-    var prev=(prevS||prevD)?((prevS?prevS.sum:0)+(prevD?prevD.sum:0)):null;
-    return { name:store.name, kind:store.kind, days:arr, curTotal:st+dv, prevTotal:prev, storeTotal:st, delivTotal:dv };
+    var s=summarizeDays(arr); s.name=store.name; s.kind=store.kind; s.days=arr;
+    s.prevTotal=(prevS||prevD)?((prevS?prevS.sum:0)+(prevD?prevD.sum:0)):null;
+    return s;
   });
 }
 function storeDayChart(arr){
@@ -662,89 +684,101 @@ function storeDayChart(arr){
   var xl=""; for(var d=1;d<=maxDay;d+=5){ xl+='<text class="axis" x="'+(pad.l+(d-1)*bw+bw/2).toFixed(1)+'" y="'+(H-6)+'" text-anchor="middle">'+d+'</text>'; }
   return '<svg viewBox="0 0 '+W+' '+H+'" style="height:184px">'+g+bars+xl+'</svg>';
 }
-function showStoreDetail(id){
-  var store=null; STORES.forEach(function(s){ if(s.id===id) store=s; }); if(!store) return;
-  SCREEN="storedetail";
-  elt("screen-home").style.display="none"; elt("screen-cost").style.display="none"; elt("screen-stores").style.display="none"; elt("screen-storedetail").style.display="block";
-  [].forEach.call(document.getElementById("bottomnav").children,function(b){ b.classList.remove("on"); });
-  window.scrollTo(0,0);
-  var box=elt("storedetail"); box.innerHTML='<div class="foot">読み込み中…</div>';
-  fetchStoreDetail(store).then(function(r){
-    var badge='<span class="stbadge '+(store.kind==="FC"?"fc":"chok")+'">'+store.kind+'</span>';
-    var delta="";
-    if(r.prevTotal!=null && r.prevTotal>0){ var p=Math.round((r.curTotal-r.prevTotal)/r.prevTotal*100); delta='<span class="sd-delta '+(p>=0?"pos":"neg")+'">前月比 '+(p>=0?"+":"")+p+'%（前月 '+yen(r.prevTotal)+'）</span>'; }
-    else delta='<span class="stsub">前月データなし</span>';
-    var chart=r.days.length?storeDayChart(r.days):'<div class="empty-note">当月の日別データがありません。</div>';
-    var split='<div class="sd-split"><div class="b"><div class="l">店舗売上</div><div class="v">'+yen(r.storeTotal)+'</div></div>'
-      +'<div class="b"><div class="l">デリバリー</div><div class="v">'+yen(r.delivTotal)+'</div></div></div>';
-    box.innerHTML='<div class="card"><h2 style="margin-bottom:2px">'+r.name+' '+badge+'</h2>'
-      +'<div class="sttot" style="font-size:30px">'+yen(r.curTotal)+'</div>'
-      +'<div style="margin-top:4px">'+delta+'</div>'+split+'</div>'
-      +'<div class="card"><h2>日別売上の推移（今月）</h2>'+chart
-      +'<div class="stack-legend" style="margin-top:6px"><span class="lg"><span class="d" style="background:var(--accent)"></span>店舗</span><span class="lg"><span class="d" style="background:var(--ch2)"></span>デリバリー</span></div></div>';
-  }).catch(function(e){ box.innerHTML='<div class="card"><div class="empty-note">読み込みに失敗しました。'+(""+e)+'</div></div>'; });
-}
-function fetchStoreSummary(store){
-  if(store.adapter==="joe"){
-    return fetchTab(CURRENT.id, store.tab).then(parseDaily).then(function(days){
-      var sum=0,any=0,cnt=0,latest="",latestT=0;
-      days.forEach(function(d){ if(d.uriage>0){ sum+=d.uriage; any+=d.anydeli; cnt++; if(d.date>latest){latest=d.date;latestT=d.uriage;} } });
-      return { total:sum, storeTotal:sum-any, delivTotal:any, days:cnt, latestDay:latest?parseInt(latest.slice(8),10):0, latestTotal:latestT, noData:sum<=0 };
-    });
-  }
-  var jobs=[ fetchTab(store.sheetId, store.storeTab) ];
-  if(store.deliveryTab) jobs.push(fetchTab(store.sheetId, store.deliveryTab).catch(function(){return null;}));
-  return Promise.all(jobs).then(function(res){
-    var st=colTotals(res[0]);
-    var dv=(res[1]&&res[1].length)?colTotals(res[1]):{byDay:{},sum:0,latest:0,col:-1};
-    var total=st.sum+dv.sum;
-    var latestDay=Math.max(st.latest||0, dv.latest||0);
-    var latestTotal=(st.byDay[latestDay]||0)+(dv.byDay[latestDay]||0);
-    var days=Object.keys(st.byDay).length||Object.keys(dv.byDay).length;
-    return { total:total, storeTotal:st.sum, delivTotal:dv.sum, days:days, latestDay:latestDay, latestTotal:latestTotal, noData:(st.col<0&&dv.sum<=0) };
-  });
-}
 var STORES_LOADED=false;
-var STORE_CACHE_KEY="joe_stores_v1";
-function storeCardHtml(s, r, err, today){
+var STORE_CACHE_KEY="joe_stores_v2";
+var STORE_DETAILS={};                 // id -> detail(days含む)
+var STORES_VIEW_MODE="cards";         // "cards" | "day"
+var STORES_DAY=null;                  // 一覧・日別モードの選択日
+var STOREDETAIL_ID=null, STOREDETAIL_DAY=null;
+function dayLabel(day){ var n=new Date(); var d=new Date(n.getFullYear(),n.getMonth(),day); var w=["日","月","火","水","木","金","土"][d.getDay()]; return (n.getMonth()+1)+"月"+day+"日("+w+")"; }
+function dayNavHtml(day, maxDay, fn){
+  return '<div class="daynav"><button class="arw" '+(day<=1?"disabled":"")+' onclick="'+fn+'(-1)">‹</button>'
+    +'<div class="dlab">'+dayLabel(day)+'</div>'
+    +'<button class="arw" '+(day>=maxDay?"disabled":"")+' onclick="'+fn+'(1)">›</button></div>'
+    +'<button class="todaybtn" onclick="'+fn+'(0)">今日('+maxDay+'日)へ</button>';
+}
+function storeCardHtml(s, r, today){
   var badge='<span class="stbadge '+(s.kind==="FC"?"fc":"chok")+'">'+s.kind+'</span>';
-  if(err) return '<div class="strow"><div class="stname">'+s.name+' '+badge+'</div><div class="stwarn">⚠️ 読み込めませんでした</div></div>';
   if(!r||r.noData||r.total<=0) return '<div class="strow"><div class="stname">'+s.name+' '+badge+'</div><div class="stsub">今月のデータはまだありません</div></div>';
-  var avg=r.days>0?Math.round(r.total/r.days):0;
+  var avg=r.daysCount>0?Math.round(r.total/r.daysCount):0;
   var delivPct=r.total>0?Math.round(r.delivTotal/r.total*100):0;
   var stale=(r.latestDay>0 && (today-r.latestDay)>7) ? ' <span class="stwarn">⚠️更新'+(today-r.latestDay)+'日前?</span>' : '';
   var delivLine = r.delivTotal>0 ? '　デリバリー '+delivPct+'%' : '';
   return '<div class="strow clk" onclick="showStoreDetail(\''+s.id+'\')">'
     +'<div class="stname">'+s.name+' '+badge+'<span class="stchev">›</span></div>'
     +'<div class="sttot">'+yen(r.total)+'</div>'
-    +'<div class="stsub">平均日商 '+yen(avg)+' ・ '+r.days+'日入力'+delivLine+'</div>'
+    +'<div class="stsub">平均日商 '+yen(avg)+' ・ '+r.daysCount+'日入力'+delivLine+'</div>'
     +'<div class="stsub">直近 '+(r.latestDay||"-")+'日 '+yen(r.latestTotal)+stale+'</div>'
     +'</div>';
 }
-function renderStores(force){
-  if(STORES_LOADED && !force) return;
-  STORES_LOADED=true;
-  var now=new Date(); var today=now.getDate();
-  elt("stores-sub").textContent = "（"+(now.getMonth()+1)+"月・自動判定）";
-  var list=elt("store-list");
-  var cache=null; try{ cache=JSON.parse(localStorage.getItem(STORE_CACHE_KEY)||"null"); }catch(e){}
-  // キャッシュがあれば即表示、無ければ「読み込み中」枠。各店は読めた順に差し替え
-  list.innerHTML = STORES.map(function(s){
-    var inner = (cache&&cache[s.id]) ? storeCardHtml(s, cache[s.id], null, today)
-      : '<div class="strow"><div class="stname">'+s.name+'</div><div class="stsub">読み込み中…</div></div>';
-    return '<div id="stc_'+s.id+'">'+inner+'</div>';
-  }).join("") + '<div id="stc_grand"></div>';
-  var results = (cache && typeof cache==="object") ? cache : {};
-  function saveAndGrand(){
-    try{ localStorage.setItem(STORE_CACHE_KEY, JSON.stringify(results)); }catch(e){}
-    var g=0; STORES.forEach(function(s){ if(results[s.id]&&results[s.id].total>0) g+=results[s.id].total; });
-    var ge=elt("stc_grand"); if(ge) ge.innerHTML='<div class="strow stgrand"><div class="stname">'+STORES.length+'店 合計</div><div class="sttot">'+yen(g)+'</div></div>';
+function storesDayRows(day){
+  var rows=STORES.map(function(s){ var det=STORE_DETAILS[s.id]; var badge='<span class="stbadge '+(s.kind==="FC"?"fc":"chok")+'">'+s.kind+'</span>';
+    if(!det) return '<div class="dayrow"><div class="n">'+s.name+' '+badge+'</div><div class="v none">…</div></div>';
+    var it=null; (det.days||[]).forEach(function(x){ if(x.day===day) it=x; });
+    var v = (it&&it.total>0) ? '<div class="v">'+yen(it.total)+'</div>' : '<div class="v none">入力なし</div>';
+    return '<div class="dayrow clk" style="cursor:pointer" onclick="showStoreDetail(\''+s.id+'\','+day+')"><div class="n">'+s.name+' '+badge+'</div>'+v+'</div>';
+  }).join("");
+  var g=0; STORES.forEach(function(s){ var det=STORE_DETAILS[s.id]; if(det)(det.days||[]).forEach(function(x){ if(x.day===day)g+=x.total; }); });
+  rows+='<div class="dayrow"><div class="n">'+STORES.length+'店 合計</div><div class="v">'+yen(g)+'</div></div>';
+  return rows;
+}
+function paintStoreBody(){
+  var body=elt("store-body"); if(!body) return;
+  var today=new Date().getDate();
+  if(STORES_VIEW_MODE==="day"){
+    if(STORES_DAY==null){ var mx=0; STORES.forEach(function(s){ var d=STORE_DETAILS[s.id]; if(d&&d.latestDay>mx)mx=d.latestDay; }); STORES_DAY=mx||today; }
+    body.innerHTML = dayNavHtml(STORES_DAY, today, "stepStoresDay") + '<div style="margin-top:6px">'+storesDayRows(STORES_DAY)+'</div>';
+  } else {
+    var g=0; var cards=STORES.map(function(s){ var d=STORE_DETAILS[s.id]; if(d&&d.total>0)g+=d.total;
+      return d?storeCardHtml(s,d,today):'<div class="strow"><div class="stname">'+s.name+'</div><div class="stsub">読み込み中…</div></div>'; }).join("");
+    body.innerHTML = cards + '<div class="strow stgrand"><div class="stname">'+STORES.length+'店 合計</div><div class="sttot">'+yen(g)+'</div></div>';
   }
-  saveAndGrand();
-  STORES.forEach(function(s){
-    fetchStoreSummary(s).then(function(r){ results[s.id]=r; var c=elt("stc_"+s.id); if(c) c.innerHTML=storeCardHtml(s,r,null,today); saveAndGrand(); })
-      .catch(function(e){ var c=elt("stc_"+s.id); if(c && !(cache&&cache[s.id])) c.innerHTML=storeCardHtml(s,null,e,today); });
-  });
+}
+function paintStoreScreen(){
+  var now=new Date(); var e=elt("stores-sub"); if(e) e.textContent="（"+(now.getMonth()+1)+"月・自動判定）";
+  elt("store-list").innerHTML='<div class="seg"><button class="'+(STORES_VIEW_MODE==="cards"?"on":"")+'" onclick="setStoreMode(\'cards\')">店舗別</button><button class="'+(STORES_VIEW_MODE==="day"?"on":"")+'" onclick="setStoreMode(\'day\')">日別</button></div><div id="store-body"></div>';
+  paintStoreBody();
+}
+function setStoreMode(m){ STORES_VIEW_MODE=m; STORES_DAY=null; paintStoreScreen(); }
+function stepStoresDay(delta){ var today=new Date().getDate(); STORES_DAY = (delta===0)?today:Math.max(1,Math.min(today,(STORES_DAY||today)+delta)); paintStoreBody(); }
+function renderStores(force){
+  if(!STORES_LOADED || force){
+    STORES_LOADED=true;
+    try{ var c=JSON.parse(localStorage.getItem(STORE_CACHE_KEY)||"null"); if(c&&typeof c==="object") STORE_DETAILS=c; }catch(e){}
+    STORES.forEach(function(s){ fetchStoreDetail(s).then(function(r){ STORE_DETAILS[s.id]=r; try{localStorage.setItem(STORE_CACHE_KEY,JSON.stringify(STORE_DETAILS));}catch(e){} if(SCREEN==="stores") paintStoreBody(); }).catch(function(){}); });
+  }
+  paintStoreScreen();
+}
+function storeChipsHtml(curId){ return '<div class="chips">'+STORES.map(function(s){ return '<div class="chip '+(s.id===curId?"on":"")+'" onclick="showStoreDetail(\''+s.id+'\')">'+s.name+'</div>'; }).join("")+'</div>'; }
+function renderStoreDetailInner(store, r){
+  var today=new Date().getDate();
+  if(STOREDETAIL_DAY==null) STOREDETAIL_DAY = r.latestDay||today;
+  var badge='<span class="stbadge '+(store.kind==="FC"?"fc":"chok")+'">'+store.kind+'</span>';
+  var back='<button class="backbtn" onclick="showScreen(\'stores\')">‹ 店舗一覧へ</button>';
+  var delta = (r.prevTotal!=null&&r.prevTotal>0)
+    ? ('<span class="sd-delta '+((r.total-r.prevTotal)>=0?"pos":"neg")+'">前月比 '+((r.total-r.prevTotal)>=0?"+":"")+Math.round((r.total-r.prevTotal)/r.prevTotal*100)+'%（前月 '+yen(r.prevTotal)+'）</span>')
+    : '<span class="stsub">前月データなし</span>';
+  var split='<div class="sd-split"><div class="b"><div class="l">店舗売上</div><div class="v">'+yen(r.storeTotal)+'</div></div><div class="b"><div class="l">デリバリー</div><div class="v">'+yen(r.delivTotal)+'</div></div></div>';
+  var head='<div class="card"><h2 style="font-size:21px;margin-bottom:2px">'+r.name+' '+badge+'</h2><div class="sttot" style="font-size:30px">'+yen(r.total)+'</div><div style="margin-top:4px">'+delta+'</div>'+split+'</div>';
+  var it=null; (r.days||[]).forEach(function(x){ if(x.day===STOREDETAIL_DAY) it=x; });
+  var dvals = (it&&it.total>0)
+    ? ('<div class="dv-row"><span>合計</span><b>'+yen(it.total)+'</b></div><div class="dv-row"><span>店舗売上</span><b>'+yen(it.store)+'</b></div><div class="dv-row"><span>デリバリー</span><b>'+yen(it.deliv)+'</b></div>')
+    : '<div class="empty-note" style="text-align:center;padding:14px 0">この日は入力がありません</div>';
+  var dayCard='<div class="card"><h2>日別の金額</h2>'+dayNavHtml(STOREDETAIL_DAY, today, "stepDetailDay")+'<div class="dvals">'+dvals+'</div></div>';
+  var chart=(r.days&&r.days.length)?('<div class="card"><h2>日別売上の推移（今月）</h2>'+storeDayChart(r.days)+'<div class="stack-legend" style="margin-top:6px"><span class="lg"><span class="d" style="background:var(--accent)"></span>店舗</span><span class="lg"><span class="d" style="background:var(--ch2)"></span>デリバリー</span></div></div>'):'';
+  elt("storedetail").innerHTML = back + storeChipsHtml(store.id) + head + dayCard + chart;
+}
+function stepDetailDay(delta){ var today=new Date().getDate(); STOREDETAIL_DAY=(delta===0)?today:Math.max(1,Math.min(today,(STOREDETAIL_DAY||today)+delta)); var st=null; STORES.forEach(function(s){ if(s.id===STOREDETAIL_ID)st=s; }); if(st&&STORE_DETAILS[STOREDETAIL_ID]) renderStoreDetailInner(st, STORE_DETAILS[STOREDETAIL_ID]); }
+function showStoreDetail(id, day){
+  var store=null; STORES.forEach(function(s){ if(s.id===id) store=s; }); if(!store) return;
+  SCREEN="storedetail"; STOREDETAIL_ID=id; STOREDETAIL_DAY=(day!=null?day:null);
+  elt("screen-home").style.display="none"; elt("screen-cost").style.display="none"; elt("screen-stores").style.display="none"; elt("screen-storedetail").style.display="block";
+  [].forEach.call(document.getElementById("bottomnav").children,function(b){ b.classList.toggle("on", b.dataset.screen==="stores"); });
+  window.scrollTo(0,0);
+  if(STORE_DETAILS[id]) renderStoreDetailInner(store, STORE_DETAILS[id]);
+  else elt("storedetail").innerHTML='<div class="foot">読み込み中…</div>';
+  fetchStoreDetail(store).then(function(r){ STORE_DETAILS[id]=r; try{localStorage.setItem(STORE_CACHE_KEY,JSON.stringify(STORE_DETAILS));}catch(e){} if(SCREEN==="storedetail"&&STOREDETAIL_ID===id) renderStoreDetailInner(store,r); })
+    .catch(function(e){ if(!STORE_DETAILS[id]) elt("storedetail").innerHTML='<div class="card"><div class="empty-note">読み込みに失敗しました。'+(""+e)+'</div></div>'; });
 }
 function showScreen(name){
   SCREEN=name;
