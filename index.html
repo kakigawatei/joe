@@ -172,6 +172,12 @@
   .stwarn{color:var(--bad);font-weight:800;}
   .stgrand{border-top:2px solid var(--line);border-bottom:0;display:flex;align-items:center;justify-content:space-between;margin-top:4px;padding-top:12px;}
   .stgrand .stname{font-size:15px;} .stgrand .sttot{margin-top:0;}
+  .strow.clk{cursor:pointer;} .strow.clk:active{opacity:.6;}
+  .stchev{margin-left:auto;color:var(--muted);font-weight:800;font-size:18px;}
+  .backbtn{background:none;border:0;color:var(--accent);font-family:inherit;font-weight:800;font-size:14px;cursor:pointer;padding:4px 0 10px;}
+  .sd-delta{font-size:13px;font-weight:800;} .sd-delta.pos{color:var(--good);} .sd-delta.neg{color:var(--bad);}
+  .sd-split{display:flex;gap:12px;margin-top:6px;} .sd-split .b{flex:1;background:color-mix(in srgb,var(--accent) 5%, var(--panel));border:1px solid var(--line);border-radius:11px;padding:10px 12px;}
+  .sd-split .l{font-size:11.5px;color:var(--muted);font-weight:700;} .sd-split .v{font-size:19px;font-weight:800;margin-top:3px;}
 </style>
 </head>
 <body>
@@ -268,6 +274,12 @@
     </div>
     <div class="foot" id="foot3"></div>
    </div><!-- /screen-stores -->
+
+   <div id="screen-storedetail" style="display:none;">
+    <button class="backbtn" onclick="showScreen('stores')">‹ 店舗一覧へ</button>
+    <div id="storedetail"><div class="foot">読み込み中…</div></div>
+    <div class="foot" id="foot4"></div>
+   </div><!-- /screen-storedetail -->
   </div>
   <div class="err" id="err" style="display:none;"></div>
 </main>
@@ -598,6 +610,80 @@ function colTotals(rows){
   if(best>=0){ for(var r=0;r<rows.length;r++){ var d=num(rows[r][0]); if(d>=1&&d<=31 && (""+(rows[r][best]||"")).trim()!==""){ var v=num(rows[r][best]); byDay[d]=v; sum+=v; days++; if(d>latest) latest=d; } } }
   return {col:best,byDay:byDay,sum:sum,days:days,latest:latest};
 }
+/* 当年でデータのある列を左→右で全部返す（当月＝最後・前月＝最後から2番目） */
+function colSeries(rows){
+  if(!rows||!rows.length) return [];
+  var ncol=0; rows.forEach(function(r){ if(r.length>ncol) ncol=r.length; });
+  var yr=-1; for(var i=0;i<Math.min(3,rows.length);i++){ for(var c=0;c<(rows[i]||[]).length;c++){ if(/20\d\d/.test(rows[i][c]||"")){ yr=i; break; } } if(yr>=0) break; }
+  var years=[], last=0;
+  for(var c=0;c<ncol;c++){ var cell=yr>=0?(rows[yr][c]||""):""; var mm=(""+cell).match(/20\d\d/); if(mm) last=parseInt(mm[0],10); years[c]=last; }
+  var year=new Date().getFullYear(), out=[];
+  for(var c=1;c<ncol;c++){ if(years[c]!==year) continue;
+    var byDay={}, sum=0, latest=0, days=0;
+    for(var r=0;r<rows.length;r++){ var d=num(rows[r][0]); if(d>=1&&d<=31 && (""+(rows[r][c]||"")).trim()!==""){ var v=num(rows[r][c]); byDay[d]=v; sum+=v; days++; if(d>latest) latest=d; } }
+    if(days>0) out.push({col:c,byDay:byDay,sum:sum,latest:latest,days:days});
+  }
+  return out;
+}
+function fetchStoreDetail(store){
+  if(store.adapter==="joe"){
+    return fetchTab(CURRENT.id, store.tab).then(parseDaily).then(function(days){
+      var arr=days.map(function(d){ return {day:parseInt(d.date.slice(8),10), store:d.uriage-d.anydeli, deliv:d.anydeli, total:d.uriage}; }).filter(function(x){return x.total>0;});
+      var st=0,dv=0; arr.forEach(function(x){st+=x.store;dv+=x.deliv;});
+      return { name:store.name, kind:store.kind, days:arr, curTotal:st+dv, prevTotal:null, storeTotal:st, delivTotal:dv };
+    });
+  }
+  var jobs=[ fetchTabVerified(store.sheetId, store.storeTab) ];
+  jobs.push(store.deliveryTab ? fetchTabVerified(store.sheetId, store.deliveryTab).catch(function(){return null;}) : Promise.resolve(null));
+  return Promise.all(jobs).then(function(res){
+    var ss=colSeries(res[0]), ds=(res[1]&&res[1].length)?colSeries(res[1]):[];
+    var curS=ss.length?ss[ss.length-1]:null, prevS=ss.length>=2?ss[ss.length-2]:null;
+    var curD=ds.length?ds[ds.length-1]:null, prevD=ds.length>=2?ds[ds.length-2]:null;
+    var dm={};
+    if(curS) for(var d in curS.byDay){ (dm[d]=dm[d]||{store:0,deliv:0}).store=curS.byDay[d]; }
+    if(curD) for(var d in curD.byDay){ (dm[d]=dm[d]||{store:0,deliv:0}).deliv=curD.byDay[d]; }
+    var arr=Object.keys(dm).map(function(d){ return {day:+d, store:dm[d].store||0, deliv:dm[d].deliv||0, total:(dm[d].store||0)+(dm[d].deliv||0)}; }).sort(function(a,b){return a.day-b.day;});
+    var st=curS?curS.sum:0, dv=curD?curD.sum:0;
+    var prev=(prevS||prevD)?((prevS?prevS.sum:0)+(prevD?prevD.sum:0)):null;
+    return { name:store.name, kind:store.kind, days:arr, curTotal:st+dv, prevTotal:prev, storeTotal:st, delivTotal:dv };
+  });
+}
+function storeDayChart(arr){
+  var W=520,H=178,pad={l:44,r:8,t:10,b:20}, iw=W-pad.l-pad.r, ih=H-pad.t-pad.b, maxDay=31;
+  var mx=Math.max.apply(null,arr.map(function(x){return x.total;}).concat([1])); mx=Math.ceil(mx/20000)*20000||mx;
+  var bw=iw/maxDay, byDay={}; arr.forEach(function(x){byDay[x.day]=x;});
+  var bars="";
+  for(var d=1;d<=maxDay;d++){ var it=byDay[d]; if(!it||it.total<=0) continue; var x=pad.l+(d-1)*bw;
+    var sh=it.store/mx*ih, dh=it.deliv/mx*ih, yS=pad.t+ih-sh, yD=yS-dh;
+    bars+='<rect x="'+(x+1).toFixed(1)+'" y="'+yS.toFixed(1)+'" width="'+(bw-2).toFixed(1)+'" height="'+Math.max(0,sh).toFixed(1)+'" fill="var(--accent)"/>';
+    if(dh>0) bars+='<rect x="'+(x+1).toFixed(1)+'" y="'+yD.toFixed(1)+'" width="'+(bw-2).toFixed(1)+'" height="'+dh.toFixed(1)+'" fill="var(--ch2)"/>';
+  }
+  var g=""; for(var t=0;t<=mx;t+=mx/4){ var y=(pad.t+ih-t/mx*ih).toFixed(1); g+='<line class="gridline" x1="'+pad.l+'" y1="'+y+'" x2="'+(W-pad.r)+'" y2="'+y+'"/><text class="axis" x="'+(pad.l-6)+'" y="'+(+y+3)+'" text-anchor="end">'+(t>=10000?(t/10000)+"万":t)+'</text>'; }
+  var xl=""; for(var d=1;d<=maxDay;d+=5){ xl+='<text class="axis" x="'+(pad.l+(d-1)*bw+bw/2).toFixed(1)+'" y="'+(H-6)+'" text-anchor="middle">'+d+'</text>'; }
+  return '<svg viewBox="0 0 '+W+' '+H+'" style="height:184px">'+g+bars+xl+'</svg>';
+}
+function showStoreDetail(id){
+  var store=null; STORES.forEach(function(s){ if(s.id===id) store=s; }); if(!store) return;
+  SCREEN="storedetail";
+  elt("screen-home").style.display="none"; elt("screen-cost").style.display="none"; elt("screen-stores").style.display="none"; elt("screen-storedetail").style.display="block";
+  [].forEach.call(document.getElementById("bottomnav").children,function(b){ b.classList.remove("on"); });
+  window.scrollTo(0,0);
+  var box=elt("storedetail"); box.innerHTML='<div class="foot">読み込み中…</div>';
+  fetchStoreDetail(store).then(function(r){
+    var badge='<span class="stbadge '+(store.kind==="FC"?"fc":"chok")+'">'+store.kind+'</span>';
+    var delta="";
+    if(r.prevTotal!=null && r.prevTotal>0){ var p=Math.round((r.curTotal-r.prevTotal)/r.prevTotal*100); delta='<span class="sd-delta '+(p>=0?"pos":"neg")+'">前月比 '+(p>=0?"+":"")+p+'%（前月 '+yen(r.prevTotal)+'）</span>'; }
+    else delta='<span class="stsub">前月データなし</span>';
+    var chart=r.days.length?storeDayChart(r.days):'<div class="empty-note">当月の日別データがありません。</div>';
+    var split='<div class="sd-split"><div class="b"><div class="l">店舗売上</div><div class="v">'+yen(r.storeTotal)+'</div></div>'
+      +'<div class="b"><div class="l">デリバリー</div><div class="v">'+yen(r.delivTotal)+'</div></div></div>';
+    box.innerHTML='<div class="card"><h2 style="margin-bottom:2px">'+r.name+' '+badge+'</h2>'
+      +'<div class="sttot" style="font-size:30px">'+yen(r.curTotal)+'</div>'
+      +'<div style="margin-top:4px">'+delta+'</div>'+split+'</div>'
+      +'<div class="card"><h2>日別売上の推移（今月）</h2>'+chart
+      +'<div class="stack-legend" style="margin-top:6px"><span class="lg"><span class="d" style="background:var(--accent)"></span>店舗</span><span class="lg"><span class="d" style="background:var(--ch2)"></span>デリバリー</span></div></div>';
+  }).catch(function(e){ box.innerHTML='<div class="card"><div class="empty-note">読み込みに失敗しました。'+(""+e)+'</div></div>'; });
+}
 function fetchStoreSummary(store){
   if(store.adapter==="joe"){
     return fetchTab(CURRENT.id, store.tab).then(parseDaily).then(function(days){
@@ -638,8 +724,8 @@ function renderStores(force){
       var delivPct=r.total>0?Math.round(r.delivTotal/r.total*100):0;
       var stale=(r.latestDay>0 && (today-r.latestDay)>7) ? ' <span class="stwarn">⚠️更新'+(today-r.latestDay)+'日前?</span>' : '';
       var delivLine = r.delivTotal>0 ? '　デリバリー '+delivPct+'%' : '';
-      return '<div class="strow">'
-        +'<div class="stname">'+s.name+' '+badge+'</div>'
+      return '<div class="strow clk" onclick="showStoreDetail(\''+s.id+'\')">'
+        +'<div class="stname">'+s.name+' '+badge+'<span class="stchev">›</span></div>'
         +'<div class="sttot">'+yen(r.total)+'</div>'
         +'<div class="stsub">平均日商 '+yen(avg)+' ・ '+r.days+'日入力'+delivLine+'</div>'
         +'<div class="stsub">直近 '+(r.latestDay||"-")+'日 '+yen(r.latestTotal)+stale+'</div>'
@@ -656,6 +742,7 @@ function showScreen(name){
   elt("screen-home").style.display = name==="home"?"block":"none";
   elt("screen-cost").style.display = name==="cost"?"block":"none";
   elt("screen-stores").style.display = name==="stores"?"block":"none";
+  var sd=elt("screen-storedetail"); if(sd) sd.style.display="none";
   if(name==="stores") renderStores(false);
   [].forEach.call(document.getElementById("bottomnav").children,function(b){ b.classList.toggle("on", b.dataset.screen===name); });
   window.scrollTo(0,0);
