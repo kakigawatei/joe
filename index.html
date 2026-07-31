@@ -633,8 +633,8 @@ function fetchStoreDetail(store){
       return { name:store.name, kind:store.kind, days:arr, curTotal:st+dv, prevTotal:null, storeTotal:st, delivTotal:dv };
     });
   }
-  var jobs=[ fetchTabVerified(store.sheetId, store.storeTab) ];
-  jobs.push(store.deliveryTab ? fetchTabVerified(store.sheetId, store.deliveryTab).catch(function(){return null;}) : Promise.resolve(null));
+  var jobs=[ fetchTab(store.sheetId, store.storeTab) ];
+  jobs.push(store.deliveryTab ? fetchTab(store.sheetId, store.deliveryTab).catch(function(){return null;}) : Promise.resolve(null));
   return Promise.all(jobs).then(function(res){
     var ss=colSeries(res[0]), ds=(res[1]&&res[1].length)?colSeries(res[1]):[];
     var curS=ss.length?ss[ss.length-1]:null, prevS=ss.length>=2?ss[ss.length-2]:null;
@@ -692,8 +692,8 @@ function fetchStoreSummary(store){
       return { total:sum, storeTotal:sum-any, delivTotal:any, days:cnt, latestDay:latest?parseInt(latest.slice(8),10):0, latestTotal:latestT, noData:sum<=0 };
     });
   }
-  var jobs=[ fetchTabVerified(store.sheetId, store.storeTab) ];
-  if(store.deliveryTab) jobs.push(fetchTabVerified(store.sheetId, store.deliveryTab).catch(function(){return null;}));
+  var jobs=[ fetchTab(store.sheetId, store.storeTab) ];
+  if(store.deliveryTab) jobs.push(fetchTab(store.sheetId, store.deliveryTab).catch(function(){return null;}));
   return Promise.all(jobs).then(function(res){
     var st=colTotals(res[0]);
     var dv=(res[1]&&res[1].length)?colTotals(res[1]):{byDay:{},sum:0,latest:0,col:-1};
@@ -705,36 +705,45 @@ function fetchStoreSummary(store){
   });
 }
 var STORES_LOADED=false;
+var STORE_CACHE_KEY="joe_stores_v1";
+function storeCardHtml(s, r, err, today){
+  var badge='<span class="stbadge '+(s.kind==="FC"?"fc":"chok")+'">'+s.kind+'</span>';
+  if(err) return '<div class="strow"><div class="stname">'+s.name+' '+badge+'</div><div class="stwarn">⚠️ 読み込めませんでした</div></div>';
+  if(!r||r.noData||r.total<=0) return '<div class="strow"><div class="stname">'+s.name+' '+badge+'</div><div class="stsub">今月のデータはまだありません</div></div>';
+  var avg=r.days>0?Math.round(r.total/r.days):0;
+  var delivPct=r.total>0?Math.round(r.delivTotal/r.total*100):0;
+  var stale=(r.latestDay>0 && (today-r.latestDay)>7) ? ' <span class="stwarn">⚠️更新'+(today-r.latestDay)+'日前?</span>' : '';
+  var delivLine = r.delivTotal>0 ? '　デリバリー '+delivPct+'%' : '';
+  return '<div class="strow clk" onclick="showStoreDetail(\''+s.id+'\')">'
+    +'<div class="stname">'+s.name+' '+badge+'<span class="stchev">›</span></div>'
+    +'<div class="sttot">'+yen(r.total)+'</div>'
+    +'<div class="stsub">平均日商 '+yen(avg)+' ・ '+r.days+'日入力'+delivLine+'</div>'
+    +'<div class="stsub">直近 '+(r.latestDay||"-")+'日 '+yen(r.latestTotal)+stale+'</div>'
+    +'</div>';
+}
 function renderStores(force){
   if(STORES_LOADED && !force) return;
   STORES_LOADED=true;
-  var now=new Date();
+  var now=new Date(); var today=now.getDate();
   elt("stores-sub").textContent = "（"+(now.getMonth()+1)+"月・自動判定）";
-  var list=elt("store-list"); list.innerHTML='<div class="foot">読み込み中…</div>';
-  var today=now.getDate();
-  Promise.all(STORES.map(function(s){
-    return fetchStoreSummary(s).then(function(r){ return {s:s,r:r}; }).catch(function(e){ return {s:s,err:(""+e)}; });
-  })).then(function(items){
-    var html=items.map(function(it){
-      var s=it.s, badge='<span class="stbadge '+(s.kind==="FC"?"fc":"chok")+'">'+s.kind+'</span>';
-      if(it.err) return '<div class="strow"><div class="stname">'+s.name+' '+badge+'</div><div class="stwarn">⚠️ 読み込めませんでした</div></div>';
-      var r=it.r;
-      if(r.noData||r.total<=0) return '<div class="strow"><div class="stname">'+s.name+' '+badge+'</div><div class="stsub">今月のデータはまだありません</div></div>';
-      var avg=r.days>0?Math.round(r.total/r.days):0;
-      var delivPct=r.total>0?Math.round(r.delivTotal/r.total*100):0;
-      var stale=(r.latestDay>0 && (today-r.latestDay)>7) ? ' <span class="stwarn">⚠️更新'+(today-r.latestDay)+'日前?</span>' : '';
-      var delivLine = r.delivTotal>0 ? '　デリバリー '+delivPct+'%' : '';
-      return '<div class="strow clk" onclick="showStoreDetail(\''+s.id+'\')">'
-        +'<div class="stname">'+s.name+' '+badge+'<span class="stchev">›</span></div>'
-        +'<div class="sttot">'+yen(r.total)+'</div>'
-        +'<div class="stsub">平均日商 '+yen(avg)+' ・ '+r.days+'日入力'+delivLine+'</div>'
-        +'<div class="stsub">直近 '+(r.latestDay||"-")+'日 '+yen(r.latestTotal)+stale+'</div>'
-        +'</div>';
-    }).join("");
-    // 合計（データのある店の当月売上合計）
-    var grand=items.reduce(function(a,it){ return a+((it.r&&it.r.total>0)?it.r.total:0); },0);
-    html+='<div class="strow stgrand"><div class="stname">6店 合計</div><div class="sttot">'+yen(grand)+'</div></div>';
-    list.innerHTML=html;
+  var list=elt("store-list");
+  var cache=null; try{ cache=JSON.parse(localStorage.getItem(STORE_CACHE_KEY)||"null"); }catch(e){}
+  // キャッシュがあれば即表示、無ければ「読み込み中」枠。各店は読めた順に差し替え
+  list.innerHTML = STORES.map(function(s){
+    var inner = (cache&&cache[s.id]) ? storeCardHtml(s, cache[s.id], null, today)
+      : '<div class="strow"><div class="stname">'+s.name+'</div><div class="stsub">読み込み中…</div></div>';
+    return '<div id="stc_'+s.id+'">'+inner+'</div>';
+  }).join("") + '<div id="stc_grand"></div>';
+  var results = (cache && typeof cache==="object") ? cache : {};
+  function saveAndGrand(){
+    try{ localStorage.setItem(STORE_CACHE_KEY, JSON.stringify(results)); }catch(e){}
+    var g=0; STORES.forEach(function(s){ if(results[s.id]&&results[s.id].total>0) g+=results[s.id].total; });
+    var ge=elt("stc_grand"); if(ge) ge.innerHTML='<div class="strow stgrand"><div class="stname">'+STORES.length+'店 合計</div><div class="sttot">'+yen(g)+'</div></div>';
+  }
+  saveAndGrand();
+  STORES.forEach(function(s){
+    fetchStoreSummary(s).then(function(r){ results[s.id]=r; var c=elt("stc_"+s.id); if(c) c.innerHTML=storeCardHtml(s,r,null,today); saveAndGrand(); })
+      .catch(function(e){ var c=elt("stc_"+s.id); if(c && !(cache&&cache[s.id])) c.innerHTML=storeCardHtml(s,null,e,today); });
   });
 }
 function showScreen(name){
