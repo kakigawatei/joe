@@ -160,6 +160,18 @@
   .rank-track{height:9px;background:var(--line);border-radius:99px;overflow:hidden;}
   .rank-fill{display:block;height:100%;border-radius:99px;background:var(--accent);min-width:2px;}
   .empty-note{color:var(--muted);font-size:12.5px;padding:6px 0;line-height:1.6;}
+  /* 店舗一覧 */
+  .strow{padding:12px 2px;border-bottom:1px solid var(--line);}
+  .strow:last-child{border-bottom:0;}
+  .stname{font-size:14.5px;font-weight:800;display:flex;align-items:center;gap:8px;}
+  .stbadge{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:99px;}
+  .stbadge.chok{background:color-mix(in srgb,var(--accent) 16%, var(--panel));color:var(--accent);}
+  .stbadge.fc{background:var(--line);color:var(--muted);}
+  .sttot{font-size:24px;font-weight:800;margin-top:3px;}
+  .stsub{font-size:12px;color:var(--muted);font-weight:600;margin-top:2px;}
+  .stwarn{color:var(--bad);font-weight:800;}
+  .stgrand{border-top:2px solid var(--line);border-bottom:0;display:flex;align-items:center;justify-content:space-between;margin-top:4px;padding-top:12px;}
+  .stgrand .stname{font-size:15px;} .stgrand .sttot{margin-top:0;}
 </style>
 </head>
 <body>
@@ -249,12 +261,20 @@
     <div class="card"><h2>人件費</h2><div id="cost-labor"></div></div>
     <div class="foot" id="foot2"></div>
    </div><!-- /screen-cost -->
+
+   <div id="screen-stores" style="display:none;">
+    <div class="card"><h2>店舗別 当月売上一覧 <span id="stores-sub" style="font-weight:500;font-size:13px;color:var(--sub)"></span></h2>
+      <div id="store-list"><div class="foot">読み込み中…</div></div>
+    </div>
+    <div class="foot" id="foot3"></div>
+   </div><!-- /screen-stores -->
   </div>
   <div class="err" id="err" style="display:none;"></div>
 </main>
 <nav class="bottomnav" id="bottomnav">
   <button data-screen="home" class="on"><span class="ic">🏠</span>ホーム</button>
   <button data-screen="cost"><span class="ic">💰</span>コスト・利益</button>
+  <button data-screen="stores"><span class="ic">🏬</span>店舗</button>
 </nav>
 
 <script>
@@ -274,6 +294,18 @@ var TABS = {
   shiire: "🧾仕入経費",
   jinken: "👤人件費"
 };
+
+/* ===== 店舗レジストリ（店舗別売上一覧）＝追加はここに1行 =====
+   直営(joe)＝既存の日次タブを再利用。FC/仙台(col)＝店ごとの不規則シートを
+   「当年の列でデータがある一番右＝当月」ロジックで自動検出（仙台のように当年データ空なら0＝誤表示防止）。*/
+var STORES = [
+  { id:"kaki",      name:"柿川亭（本店）",   kind:"直営", adapter:"joe", tab:TABS.kaki },
+  { id:"abura",     name:"アブララボ",       kind:"直営", adapter:"joe", tab:TABS.abura },
+  { id:"sendai",    name:"仙台店",           kind:"直営", adapter:"col", sheetId:"1DNXDFlYaXmiX5OWYkz-jM2JRgCmswOTBDJiY30d9VIE", storeTab:"元シート" },
+  { id:"fukushima", name:"柿川亭 福島店",     kind:"FC",  adapter:"col", sheetId:"1jJQLbO2GuMKcL14QEBhb3mjidrNCxyah5Oq9pyp8y_s", storeTab:"日報（券売機）", deliveryTab:"デリバリー" },
+  { id:"hakusan",   name:"柿川亭 白山市場店", kind:"FC",  adapter:"col", sheetId:"1htLUtSiJQ3qzJIGzAfmFaKuUYskR26vK4GGj_V5_r-A", storeTab:"シート1", deliveryTab:"Uber" },
+  { id:"shindaimae",name:"柿川亭 新大前店",   kind:"FC",  adapter:"col", sheetId:"1SQgMCEIDqgMtoHSUnnOxS8DRZqY_4oMoRX-Vo4LWH-M", storeTab:"2026年1月〜2026年12月売上" }
+];
 
 /* ===== ユーティリティ ===== */
 function gvizUrl(id, tab){ return "https://docs.google.com/spreadsheets/d/"+id+"/gviz/tq?tqx=out:csv&sheet="+encodeURIComponent(tab); }
@@ -541,10 +573,90 @@ function renderCost(mo, uriage){
 
   elt("foot2").innerHTML = DATA.label+"のデータ／損益・経費は月次集計＋各明細タブに準拠。";
 }
+/* ===== 店舗別売上一覧 ===== */
+/* タブ名検証つき取得（out:htmlの<title>で実タブ名を確認。CORS等で取れない時はcsvにフォールバック。名前不一致が確定した時だけ拒否） */
+function fetchTabVerified(id, tab){
+  var hu="https://docs.google.com/spreadsheets/d/"+id+"/gviz/tq?tqx=out:html&sheet="+encodeURIComponent(tab);
+  return fetch(hu).then(function(r){return r.text();}).then(function(html){
+    var m=html.match(/<title>([^<]*)<\/title>/); var got=m?(m[1]||"").trim():"";
+    if(got && got!==(""+tab).trim()) throw new Error("MISMATCH:"+tab+"→"+got);
+    return fetchTab(id,tab);
+  }).catch(function(e){ if((""+e).indexOf("MISMATCH")>=0) throw e; return fetchTab(id,tab); });
+}
+/* 列＝月のシートから「当年でデータがある一番右の列」を当月として集計 */
+function colTotals(rows){
+  if(!rows||!rows.length) return {col:-1,byDay:{},sum:0,days:0,latest:0};
+  var ncol=0; rows.forEach(function(r){ if(r.length>ncol) ncol=r.length; });
+  var yr=-1; for(var i=0;i<Math.min(3,rows.length);i++){ for(var c=0;c<(rows[i]||[]).length;c++){ if(/20\d\d/.test(rows[i][c]||"")){ yr=i; break; } } if(yr>=0) break; }
+  var years=[], last=0;
+  for(var c=0;c<ncol;c++){ var cell=yr>=0?(rows[yr][c]||""):""; var mm=(""+cell).match(/20\d\d/); if(mm) last=parseInt(mm[0],10); years[c]=last; }
+  var year=new Date().getFullYear(), best=-1;
+  for(var c=1;c<ncol;c++){ if(years[c]!==year) continue; var has=false;
+    for(var r=0;r<rows.length;r++){ var d=num(rows[r][0]); if(d>=1&&d<=31 && (""+(rows[r][c]||"")).trim()!==""){ has=true; break; } }
+    if(has) best=c; }
+  var byDay={}, sum=0, days=0, latest=0;
+  if(best>=0){ for(var r=0;r<rows.length;r++){ var d=num(rows[r][0]); if(d>=1&&d<=31 && (""+(rows[r][best]||"")).trim()!==""){ var v=num(rows[r][best]); byDay[d]=v; sum+=v; days++; if(d>latest) latest=d; } } }
+  return {col:best,byDay:byDay,sum:sum,days:days,latest:latest};
+}
+function fetchStoreSummary(store){
+  if(store.adapter==="joe"){
+    return fetchTab(CURRENT.id, store.tab).then(parseDaily).then(function(days){
+      var sum=0,any=0,cnt=0,latest="",latestT=0;
+      days.forEach(function(d){ if(d.uriage>0){ sum+=d.uriage; any+=d.anydeli; cnt++; if(d.date>latest){latest=d.date;latestT=d.uriage;} } });
+      return { total:sum, storeTotal:sum-any, delivTotal:any, days:cnt, latestDay:latest?parseInt(latest.slice(8),10):0, latestTotal:latestT, noData:sum<=0 };
+    });
+  }
+  var jobs=[ fetchTabVerified(store.sheetId, store.storeTab) ];
+  if(store.deliveryTab) jobs.push(fetchTabVerified(store.sheetId, store.deliveryTab).catch(function(){return null;}));
+  return Promise.all(jobs).then(function(res){
+    var st=colTotals(res[0]);
+    var dv=(res[1]&&res[1].length)?colTotals(res[1]):{byDay:{},sum:0,latest:0,col:-1};
+    var total=st.sum+dv.sum;
+    var latestDay=Math.max(st.latest||0, dv.latest||0);
+    var latestTotal=(st.byDay[latestDay]||0)+(dv.byDay[latestDay]||0);
+    var days=Object.keys(st.byDay).length||Object.keys(dv.byDay).length;
+    return { total:total, storeTotal:st.sum, delivTotal:dv.sum, days:days, latestDay:latestDay, latestTotal:latestTotal, noData:(st.col<0&&dv.sum<=0) };
+  });
+}
+var STORES_LOADED=false;
+function renderStores(force){
+  if(STORES_LOADED && !force) return;
+  STORES_LOADED=true;
+  var now=new Date();
+  elt("stores-sub").textContent = "（"+(now.getMonth()+1)+"月・自動判定）";
+  var list=elt("store-list"); list.innerHTML='<div class="foot">読み込み中…</div>';
+  var today=now.getDate();
+  Promise.all(STORES.map(function(s){
+    return fetchStoreSummary(s).then(function(r){ return {s:s,r:r}; }).catch(function(e){ return {s:s,err:(""+e)}; });
+  })).then(function(items){
+    var html=items.map(function(it){
+      var s=it.s, badge='<span class="stbadge '+(s.kind==="FC"?"fc":"chok")+'">'+s.kind+'</span>';
+      if(it.err) return '<div class="strow"><div class="stname">'+s.name+' '+badge+'</div><div class="stwarn">⚠️ 読み込めませんでした</div></div>';
+      var r=it.r;
+      if(r.noData||r.total<=0) return '<div class="strow"><div class="stname">'+s.name+' '+badge+'</div><div class="stsub">今月のデータはまだありません</div></div>';
+      var avg=r.days>0?Math.round(r.total/r.days):0;
+      var delivPct=r.total>0?Math.round(r.delivTotal/r.total*100):0;
+      var stale=(r.latestDay>0 && (today-r.latestDay)>7) ? ' <span class="stwarn">⚠️更新'+(today-r.latestDay)+'日前?</span>' : '';
+      var delivLine = r.delivTotal>0 ? '　デリバリー '+delivPct+'%' : '';
+      return '<div class="strow">'
+        +'<div class="stname">'+s.name+' '+badge+'</div>'
+        +'<div class="sttot">'+yen(r.total)+'</div>'
+        +'<div class="stsub">平均日商 '+yen(avg)+' ・ '+r.days+'日入力'+delivLine+'</div>'
+        +'<div class="stsub">直近 '+(r.latestDay||"-")+'日 '+yen(r.latestTotal)+stale+'</div>'
+        +'</div>';
+    }).join("");
+    // 合計（データのある店の当月売上合計）
+    var grand=items.reduce(function(a,it){ return a+((it.r&&it.r.total>0)?it.r.total:0); },0);
+    html+='<div class="strow stgrand"><div class="stname">6店 合計</div><div class="sttot">'+yen(grand)+'</div></div>';
+    list.innerHTML=html;
+  });
+}
 function showScreen(name){
   SCREEN=name;
   elt("screen-home").style.display = name==="home"?"block":"none";
   elt("screen-cost").style.display = name==="cost"?"block":"none";
+  elt("screen-stores").style.display = name==="stores"?"block":"none";
+  if(name==="stores") renderStores(false);
   [].forEach.call(document.getElementById("bottomnav").children,function(b){ b.classList.toggle("on", b.dataset.screen===name); });
   window.scrollTo(0,0);
 }
