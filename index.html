@@ -440,10 +440,14 @@ function parseMonthly(rows){
   var m={};
   for(var r=0;r<rows.length;r++){ var row=rows[r]; var k=(row[0]||"").trim(); if(!k) continue;
     m[k]={ kaki:num(row[1]), abura:num(row[2]), all:num(row[3]) }; }
-  function find(sub){ for(var key in m){ if(key.indexOf(sub)>=0) return m[key]; } return {kaki:0,abura:0,all:0}; }
+  function find(sub){ for(var key in m){ if(key.indexOf("◀前月")<0 && key.indexOf(sub)>=0) return m[key]; } return {kaki:0,abura:0,all:0}; }
+  /* ◀前月 行（v3台帳がビルド時に前月の確定値を書き込む）。無い台帳では prev.has=false */
+  function findPrev(sub){ for(var key in m){ if(key.indexOf("◀前月")===0 && key.indexOf(sub)>=0) return m[key]; } return null; }
+  var pU=findPrev("売上合計"), pR=findPrev("簡易利益");
   return {
     shiire:find("仕入"), jinken:find("人件費"), sokei:find("総経費"),
-    rieki:find("簡易利益"), uriageM:find("売上合計"), kyakuM:find("推定来店")
+    rieki:find("簡易利益"), uriageM:find("売上合計"), kyakuM:find("推定来店"),
+    prev:{ has:!!(pU||pR), uriage:pU||{kaki:0,abura:0,all:0}, rieki:pR||{kaki:0,abura:0,all:0} }
   };
 }
 
@@ -468,17 +472,22 @@ function dailyFor(store){
   if(store==="abura") return parseDaily(DATA.abura);
   return mergeDaily(parseDaily(DATA.kaki), parseDaily(DATA.abura));
 }
-function monthlyFor(store){ var m=parseMonthly(DATA.monthly);
-  var pick=function(o){ return store==="kaki"?o.kaki:store==="abura"?o.abura:o.all; };
-  var shiire = pick(m.shiire);   // 月次集計「仕入・経費（税込）」
-  // 人件費は月次集計に独立行が無い（v2）ので人件費タブから集計。※当月分のみ（他月の行を混ぜない）。未入力なら0。
-  // ※find("人件費")は「簡易利益（…人件費除く）」行を誤ヒットするため使わない。
+function monthlyFor(store){
+  /* v3: 月次集計タブの行ラベルに依存せず、仕入・人件費・日次の各タブから直接計算する。
+     旧実装は「簡易利益」行を読んでいたが、その行は合計列にしか値が無く、
+     柿川亭/アブララボ単体で利益が¥0になるバグがあった（masa指摘 2026-08-01）。 */
   var ym = DATA.ym || "";
-  var jinken = jinkenFor(store).filter(function(x){ return ym && (x.date||"").indexOf(ym)===0; }).reduce(function(s,x){ return s + (x.cost||0); }, 0);
-  var sokei = shiire + jinken;   // 総経費＝仕入経費＋人件費（月次に総経費行が無いので計算）
-  // シートの簡易利益は「売上−仕入経費（人件費除く）」。人件費が入力済みならさらに差し引く。
-  var rieki = pick(m.rieki) - jinken;
-  return { shiire:shiire, jinken:jinken, sokei:sokei, rieki:rieki };
+  var inYm = function(x){ return ym && (x.date||"").indexOf(ym)===0; };
+  var shiire = shiireFor(store).filter(inYm).reduce(function(s,x){ return s + (x.zeikomi||0); }, 0);
+  var jinken = jinkenFor(store).filter(inYm).reduce(function(s,x){ return s + (x.cost||0); }, 0);
+  var uriage = sumRange(dailyFor(store),["uriage"]).uriage;
+  var sokei = shiire + jinken;
+  var rieki = uriage - sokei;
+  /* 前月比の材料（台帳の「◀前月」行。v3台帳のみ） */
+  var m=parseMonthly(DATA.monthly);
+  var pick=function(o){ return store==="kaki"?o.kaki:store==="abura"?o.abura:o.all; };
+  var prev = (m.prev && m.prev.has) ? { uriage:pick(m.prev.uriage), rieki:pick(m.prev.rieki) } : null;
+  return { shiire:shiire, jinken:jinken, sokei:sokei, rieki:rieki, uriage:uriage, prev:prev };
 }
 function periodRows(daily){
   var withData = daily.filter(function(d){ return d.uriage>0 || d.kyaku>0; });
@@ -493,7 +502,16 @@ function periodRows(daily){
 
 /* ===== 描画 ===== */
 function elt(id){return document.getElementById(id);}
-function setDelta(el,label){ el.className="delta flat"; el.textContent="前月比 —"; }
+function setDelta(el, prev, cur){
+  /* prev = {rieki:前月の簡易利益} が台帳の◀前月行から取れたときだけ実比較を出す */
+  if(prev && isFinite(prev.rieki) && Math.abs(prev.rieki)>0){
+    var diff=cur-prev.rieki, pct=Math.round(diff/Math.abs(prev.rieki)*100);
+    el.className="delta "+(diff>=0?"up":"down");
+    el.textContent="前月比 "+(diff>=0?"+":"")+pct+"%（前月 "+yen(prev.rieki)+"）";
+  } else {
+    el.className="delta flat"; el.textContent="前月比 —";
+  }
+}
 
 function render(){
   if(!DATA) return;
@@ -509,7 +527,7 @@ function render(){
   var rieki=mo.rieki;
   var hv=elt("hero-val"); hv.textContent=(rieki<0?"−":"")+yen(Math.abs(rieki)).replace("¥","¥");
   hv.className="big "+(rieki>=0?"pos":"neg");
-  setDelta(elt("hero-delta"));
+  setDelta(elt("hero-delta"), mo.prev, rieki);
   elt("hero-spark").innerHTML=sparkline(daily.map(function(d){return d.uriage;}));
 
   /* kpi */
@@ -543,7 +561,7 @@ function render(){
   /* コスト画面 */
   renderCost(mo, monthTotals.uriage);
 
-  elt("foot").innerHTML = DATA.label+"のデータ／元シートと自動同期（5分毎）<br>数値は元スプレッドシートに準拠。簡易利益・経費は月次集計タブ基準。";
+  elt("foot").innerHTML = DATA.label+"のデータ／元シートと自動同期（5分毎）<br>簡易利益＝売上−仕入−人件費（台帳の各タブから自動計算・v3）。";
 }
 
 /* 曜日別 平均売上 */
@@ -682,6 +700,11 @@ function fetchStoreDetail(store){
       var s=summarizeDays(arr); s.name=store.name; s.kind=store.kind; s.days=arr; s.prevTotal=null;
       /* 台帳シートは「2026-07」のように月別。データの実日付から何月分かを持たせる */
       s.ym = days.length ? days[days.length-1].date.slice(0,7) : null;
+      /* 前月比: 台帳の◀前月行（ホーム読込済みのDATAがあれば） */
+      try{
+        if(DATA && DATA.monthly){ var mp=parseMonthly(DATA.monthly);
+          if(mp.prev && mp.prev.has) s.prevTotal = (store.id==="kaki") ? mp.prev.uriage.kaki : mp.prev.uriage.abura; }
+      }catch(e){}
       return s;
     });
   }
@@ -894,11 +917,21 @@ function renderFlash(daily){
   var wd=daily.filter(function(d){return d.uriage>0||d.kyaku>0;});
   var last=wd[wd.length-1];
   if(!last){ elt("flash").innerHTML='<div class="f"><span class="l">データなし</span></div>'; elt("flash-h").textContent="最新日の速報"; return; }
-  elt("flash-h").textContent=last.date.slice(5).replace("-","/")+"（"+last.dow+"）の速報";
+  elt("flash-h").textContent=last.date.slice(5).replace("-","/")+"（"+last.dow+"）の速報"+(STORE==="all"?"｜2店合計":"");
   var tanka=last.kyaku>0?last.uriage/last.kyaku:0;
+  var split="";
+  if(STORE==="all"){
+    /* 全店表示のとき「この¥◯◯は何の数字?」となりやすい（masa 2026-08-01）ので店別内訳を添える */
+    var pick=function(list){ var hit=null; list.forEach(function(d){ if(d.date===last.date) hit=d; }); return hit; };
+    var k=pick(parseDaily(DATA.kaki)), a=pick(parseDaily(DATA.abura));
+    var parts=[];
+    if(k&&k.uriage>0) parts.push("柿川亭 "+yen(k.uriage));
+    if(a&&a.uriage>0) parts.push("アブララボ "+yen(a.uriage));
+    if(parts.length) split='<div class="f" style="grid-column:1/-1"><span class="l">内訳</span><span class="v tnum" style="font-size:14px">'+parts.join("　")+'</span></div>';
+  }
   elt("flash").innerHTML=
     f("売上",yen(last.uriage))+f("客数",ppl(last.kyaku))+
-    f("客単価",yen(tanka))+f("券売機",yen(last.kenbai));
+    f("客単価",yen(tanka))+f("券売機",yen(last.kenbai))+split;
   function f(l,v){ return '<div class="f"><span class="l">'+l+'</span><span class="v tnum">'+v+'</span></div>'; }
 }
 
