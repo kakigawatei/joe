@@ -327,13 +327,15 @@ var TABS = {
 /* ===== 店舗レジストリ（店舗別売上一覧）＝追加はここに1行 =====
    直営(joe)＝既存の日次タブを再利用。FC/仙台(col)＝店ごとの不規則シートを
    「当年の列でデータがある一番右＝当月」ロジックで自動検出（仙台のように当年データ空なら0＝誤表示防止）。*/
+/* sub2 = 2つ目の内訳の呼び名。直営(joe)のanydeli列は「デリバリー」ではなく
+   キャッシュレス決済の売上（masa 2026-08-01 指摘）。FC/仙台の2枚目タブは本当にデリバリー。 */
 var STORES = [
-  { id:"kaki",      name:"柿川亭（本店）",   kind:"直営", adapter:"joe", tab:TABS.kaki },
-  { id:"abura",     name:"アブララボ",       kind:"直営", adapter:"joe", tab:TABS.abura },
-  { id:"sendai",    name:"仙台店",           kind:"直営", adapter:"col", sheetId:"1DNXDFlYaXmiX5OWYkz-jM2JRgCmswOTBDJiY30d9VIE", storeTab:"日報（券売機）", deliveryTab:"デリバリー" },
-  { id:"fukushima", name:"柿川亭 福島店",     kind:"FC",  adapter:"col", sheetId:"1jJQLbO2GuMKcL14QEBhb3mjidrNCxyah5Oq9pyp8y_s", storeTab:"日報（券売機）", deliveryTab:"デリバリー" },
-  { id:"hakusan",   name:"柿川亭 白山市場店", kind:"FC",  adapter:"col", sheetId:"1htLUtSiJQ3qzJIGzAfmFaKuUYskR26vK4GGj_V5_r-A", storeTab:"シート1", deliveryTab:"Uber" },
-  { id:"shindaimae",name:"柿川亭 新大前店",   kind:"FC",  adapter:"col", sheetId:"1SQgMCEIDqgMtoHSUnnOxS8DRZqY_4oMoRX-Vo4LWH-M", storeTab:"2026年1月〜2026年12月売上" }
+  { id:"kaki",      name:"柿川亭（本店）",   kind:"直営", adapter:"joe", tab:TABS.kaki,  sub2:"キャッシュレス" },
+  { id:"abura",     name:"アブララボ",       kind:"直営", adapter:"joe", tab:TABS.abura, sub2:"キャッシュレス" },
+  { id:"sendai",    name:"仙台店",           kind:"直営", adapter:"col", sheetId:"1DNXDFlYaXmiX5OWYkz-jM2JRgCmswOTBDJiY30d9VIE", storeTab:"日報（券売機）", deliveryTab:"デリバリー", sub2:"デリバリー" },
+  { id:"fukushima", name:"柿川亭 福島店",     kind:"FC",  adapter:"col", sheetId:"1jJQLbO2GuMKcL14QEBhb3mjidrNCxyah5Oq9pyp8y_s", storeTab:"日報（券売機）", deliveryTab:"デリバリー", sub2:"デリバリー" },
+  { id:"hakusan",   name:"柿川亭 白山市場店", kind:"FC",  adapter:"col", sheetId:"1htLUtSiJQ3qzJIGzAfmFaKuUYskR26vK4GGj_V5_r-A", storeTab:"シート1", deliveryTab:"Uber", sub2:"デリバリー" },
+  { id:"shindaimae",name:"柿川亭 新大前店",   kind:"FC",  adapter:"col", sheetId:"1SQgMCEIDqgMtoHSUnnOxS8DRZqY_4oMoRX-Vo4LWH-M", storeTab:"2026年1月〜2026年12月売上", sub2:"デリバリー" }
 ];
 
 /* ===== ユーティリティ ===== */
@@ -638,9 +640,18 @@ function colSeries(rows){
   for(var c=1;c<ncol;c++){ if(years[c]!==year) continue;
     var byDay={}, sum=0, latest=0, days=0;
     for(var r=0;r<rows.length;r++){ var d=num(rows[r][0]); if(d>=1&&d<=31 && (""+(rows[r][c]||"")).trim()!==""){ var v=num(rows[r][c]); byDay[d]=v; sum+=v; days++; if(d>latest) latest=d; } }
-    if(days>0) out.push({col:c,byDay:byDay,sum:sum,latest:latest,days:days});
+    if(days>0) out.push({col:c,byDay:byDay,sum:sum,latest:latest,days:days,ym:colYm(rows,c,years[c])});
   }
   return out;
+}
+/* 列見出しから「何年何月の列か」を拾う（"2026年7月" / "7月" 等）。取れなければnull */
+function colYm(rows, c, year){
+  for(var i=0;i<Math.min(4,rows.length);i++){
+    var t=""+(((rows[i]||[])[c])||"");
+    var m=t.match(/(\d{1,2})\s*月/);
+    if(m){ var mo=parseInt(m[1],10); if(mo>=1&&mo<=12) return (year||new Date().getFullYear())+"-"+("0"+mo).slice(-2); }
+  }
+  return null;
 }
 function summarizeDays(days){
   var storeTotal=0,delivTotal=0,latestDay=0,latestTotal=0;
@@ -652,7 +663,10 @@ function fetchStoreDetail(store){
   if(store.adapter==="joe"){
     return fetchTab(CURRENT.id, store.tab).then(parseDaily).then(function(days){
       var arr=days.map(function(d){ return {day:parseInt(d.date.slice(8),10), store:d.uriage-d.anydeli, deliv:d.anydeli, total:d.uriage}; }).filter(function(x){return x.total>0;});
-      var s=summarizeDays(arr); s.name=store.name; s.kind=store.kind; s.days=arr; s.prevTotal=null; return s;
+      var s=summarizeDays(arr); s.name=store.name; s.kind=store.kind; s.days=arr; s.prevTotal=null;
+      /* 台帳シートは「2026-07」のように月別。データの実日付から何月分かを持たせる */
+      s.ym = days.length ? days[days.length-1].date.slice(0,7) : null;
+      return s;
     });
   }
   var jobs=[ fetchTab(store.sheetId, store.storeTab) ];
@@ -667,6 +681,7 @@ function fetchStoreDetail(store){
     var arr=Object.keys(dm).map(function(d){ return {day:+d, store:dm[d].store||0, deliv:dm[d].deliv||0, total:(dm[d].store||0)+(dm[d].deliv||0)}; }).sort(function(a,b){return a.day-b.day;});
     var s=summarizeDays(arr); s.name=store.name; s.kind=store.kind; s.days=arr;
     s.prevTotal=(prevS||prevD)?((prevS?prevS.sum:0)+(prevD?prevD.sum:0)):null;
+    s.ym=(curS&&curS.ym)||(curD&&curD.ym)||null;
     return s;
   });
 }
@@ -685,31 +700,54 @@ function storeDayChart(arr){
   return '<svg viewBox="0 0 '+W+' '+H+'" style="height:184px">'+g+bars+xl+'</svg>';
 }
 var STORES_LOADED=false;
-var STORE_CACHE_KEY="joe_stores_v2";
+var STORE_CACHE_KEY="joe_stores_v3";  // v3=ym(何月分か)を持たせた版。古いキャッシュを使わせない
 var STORE_DETAILS={};                 // id -> detail(days含む)
 var STORES_VIEW_MODE="cards";         // "cards" | "day"
 var STORES_DAY=null;                  // 一覧・日別モードの選択日
 var STOREDETAIL_ID=null, STOREDETAIL_DAY=null;
-function dayLabel(day){ var n=new Date(); var d=new Date(n.getFullYear(),n.getMonth(),day); var w=["日","月","火","水","木","金","土"][d.getDay()]; return (n.getMonth()+1)+"月"+day+"日("+w+")"; }
-function dayNavHtml(day, maxDay, fn){
-  return '<div class="daynav"><button class="arw" '+(day<=1?"disabled":"")+' onclick="'+fn+'(-1)">‹</button>'
-    +'<div class="dlab">'+dayLabel(day)+'</div>'
-    +'<button class="arw" '+(day>=maxDay?"disabled":"")+' onclick="'+fn+'(1)">›</button></div>'
-    +'<button class="todaybtn" onclick="'+fn+'(0)">今日('+maxDay+'日)へ</button>';
+/* ym="YYYY-MM"（データが実際に何月のものか）。未指定なら今月扱い。
+   ※以前は曜日も月も new Date() で作っていたため、8月に入った瞬間に7月のデータが
+     「8月31日(月)」のように誤表示されていた（2026-08-01 masa指摘）。 */
+function nowYm(){ var n=new Date(); return n.getFullYear()+"-"+("0"+(n.getMonth()+1)).slice(-2); }
+function isCurMonth(ym){ return !ym || ym===nowYm(); }
+function ymText(ym){ if(!ym) return ""; return (+ym.slice(0,4))+"年"+(+ym.slice(5,7))+"月"; }
+function dayLabel(day, ym){
+  var y, mo;
+  if(ym && /^\d{4}-\d{2}$/.test(ym)){ y=+ym.slice(0,4); mo=+ym.slice(5,7)-1; }
+  else { var n=new Date(); y=n.getFullYear(); mo=n.getMonth(); }
+  var d=new Date(y,mo,day); var w=["日","月","火","水","木","金","土"][d.getDay()];
+  return (mo+1)+"月"+day+"日("+w+")";
 }
+function dayNavHtml(day, maxDay, fn, ym){
+  var jump = isCurMonth(ym) ? ('今日('+maxDay+'日)へ') : ('最終日('+maxDay+'日)へ');
+  return '<div class="daynav"><button class="arw" '+(day<=1?"disabled":"")+' onclick="'+fn+'(-1)">‹</button>'
+    +'<div class="dlab">'+dayLabel(day, ym)+'</div>'
+    +'<button class="arw" '+(day>=maxDay?"disabled":"")+' onclick="'+fn+'(1)">›</button></div>'
+    +'<button class="todaybtn" onclick="'+fn+'(0)">'+jump+'</button>';
+}
+/* 日を進める上限＝当月なら今日、過去月ならデータの最終日 */
+function dayBound(ym, latestDay){ return isCurMonth(ym) ? new Date().getDate() : (latestDay||31); }
 function storeCardHtml(s, r, today){
   var badge='<span class="stbadge '+(s.kind==="FC"?"fc":"chok")+'">'+s.kind+'</span>';
   if(!r||r.noData||r.total<=0) return '<div class="strow"><div class="stname">'+s.name+' '+badge+'</div><div class="stsub">今月のデータはまだありません</div></div>';
   var avg=r.daysCount>0?Math.round(r.total/r.daysCount):0;
+  var sub2=s.sub2||"デリバリー";
   var delivPct=r.total>0?Math.round(r.delivTotal/r.total*100):0;
-  var stale=(r.latestDay>0 && (today-r.latestDay)>7) ? ' <span class="stwarn">⚠️更新'+(today-r.latestDay)+'日前?</span>' : '';
-  var delivLine = r.delivTotal>0 ? '　デリバリー '+delivPct+'%' : '';
+  /* 「◯日前」は当月のデータにだけ意味がある。過去月のシートを見ているときは出さない */
+  var stale=(isCurMonth(r.ym) && r.latestDay>0 && (today-r.latestDay)>7) ? ' <span class="stwarn">⚠️更新'+(today-r.latestDay)+'日前?</span>' : '';
+  var oldTag=isCurMonth(r.ym) ? '' : ' <span class="stwarn">'+ymText(r.ym)+'分</span>';
+  var delivLine = r.delivTotal>0 ? ('　'+sub2+' '+delivPct+'%') : '';
   return '<div class="strow clk" onclick="showStoreDetail(\''+s.id+'\')">'
-    +'<div class="stname">'+s.name+' '+badge+'<span class="stchev">›</span></div>'
+    +'<div class="stname">'+s.name+' '+badge+oldTag+'<span class="stchev">›</span></div>'
     +'<div class="sttot">'+yen(r.total)+'</div>'
     +'<div class="stsub">平均日商 '+yen(avg)+' ・ '+r.daysCount+'日入力'+delivLine+'</div>'
     +'<div class="stsub">直近 '+(r.latestDay||"-")+'日 '+yen(r.latestTotal)+stale+'</div>'
     +'</div>';
+}
+/* 一覧の「日別」モードで使う年月＝各店のymのうち一番新しいもの */
+function storesYm(){
+  var best=null; STORES.forEach(function(s){ var d=STORE_DETAILS[s.id]; if(d&&d.ym&&(!best||d.ym>best)) best=d.ym; });
+  return best;
 }
 function storesDayRows(day){
   var rows=STORES.map(function(s){ var det=STORE_DETAILS[s.id]; var badge='<span class="stbadge '+(s.kind==="FC"?"fc":"chok")+'">'+s.kind+'</span>';
@@ -726,8 +764,10 @@ function paintStoreBody(){
   var body=elt("store-body"); if(!body) return;
   var today=new Date().getDate();
   if(STORES_VIEW_MODE==="day"){
-    if(STORES_DAY==null){ var mx=0; STORES.forEach(function(s){ var d=STORE_DETAILS[s.id]; if(d&&d.latestDay>mx)mx=d.latestDay; }); STORES_DAY=mx||today; }
-    body.innerHTML = dayNavHtml(STORES_DAY, today, "stepStoresDay") + '<div style="margin-top:6px">'+storesDayRows(STORES_DAY)+'</div>';
+    var mx=0; STORES.forEach(function(s){ var d=STORE_DETAILS[s.id]; if(d&&d.latestDay>mx)mx=d.latestDay; });
+    var ym=storesYm(), bound=dayBound(ym, mx);
+    if(STORES_DAY==null){ STORES_DAY=mx||bound; }
+    body.innerHTML = dayNavHtml(STORES_DAY, bound, "stepStoresDay", ym) + '<div style="margin-top:6px">'+storesDayRows(STORES_DAY)+'</div>';
   } else {
     var g=0; var cards=STORES.map(function(s){ var d=STORE_DETAILS[s.id]; if(d&&d.total>0)g+=d.total;
       return d?storeCardHtml(s,d,today):'<div class="strow"><div class="stname">'+s.name+'</div><div class="stsub">読み込み中…</div></div>'; }).join("");
@@ -735,12 +775,17 @@ function paintStoreBody(){
   }
 }
 function paintStoreScreen(){
-  var now=new Date(); var e=elt("stores-sub"); if(e) e.textContent="（"+(now.getMonth()+1)+"月・自動判定）";
+  var e=elt("stores-sub"); var ym=storesYm();
+  if(e) e.textContent = ym ? ("（"+ymText(ym)+"分・自動判定）") : "（読み込み中）";
   elt("store-list").innerHTML='<div class="seg"><button class="'+(STORES_VIEW_MODE==="cards"?"on":"")+'" onclick="setStoreMode(\'cards\')">店舗別</button><button class="'+(STORES_VIEW_MODE==="day"?"on":"")+'" onclick="setStoreMode(\'day\')">日別</button></div><div id="store-body"></div>';
   paintStoreBody();
 }
 function setStoreMode(m){ STORES_VIEW_MODE=m; STORES_DAY=null; paintStoreScreen(); }
-function stepStoresDay(delta){ var today=new Date().getDate(); STORES_DAY = (delta===0)?today:Math.max(1,Math.min(today,(STORES_DAY||today)+delta)); paintStoreBody(); }
+function stepStoresDay(delta){
+  var mx=0; STORES.forEach(function(s){ var d=STORE_DETAILS[s.id]; if(d&&d.latestDay>mx)mx=d.latestDay; });
+  var bound=dayBound(storesYm(), mx);
+  STORES_DAY = (delta===0)?bound:Math.max(1,Math.min(bound,(STORES_DAY||bound)+delta)); paintStoreBody();
+}
 function renderStores(force){
   if(!STORES_LOADED || force){
     STORES_LOADED=true;
@@ -751,24 +796,30 @@ function renderStores(force){
 }
 function storeChipsHtml(curId){ return '<div class="chips">'+STORES.map(function(s){ return '<div class="chip '+(s.id===curId?"on":"")+'" onclick="showStoreDetail(\''+s.id+'\')">'+s.name+'</div>'; }).join("")+'</div>'; }
 function renderStoreDetailInner(store, r){
-  var today=new Date().getDate();
-  if(STOREDETAIL_DAY==null) STOREDETAIL_DAY = r.latestDay||today;
+  var bound=dayBound(r.ym, r.latestDay), sub2=store.sub2||"デリバリー", per=ymText(r.ym);
+  if(STOREDETAIL_DAY==null) STOREDETAIL_DAY = r.latestDay||bound;
   var badge='<span class="stbadge '+(store.kind==="FC"?"fc":"chok")+'">'+store.kind+'</span>';
   var back='<button class="backbtn" onclick="showScreen(\'stores\')">‹ 店舗一覧へ</button>';
   var delta = (r.prevTotal!=null&&r.prevTotal>0)
     ? ('<span class="sd-delta '+((r.total-r.prevTotal)>=0?"pos":"neg")+'">前月比 '+((r.total-r.prevTotal)>=0?"+":"")+Math.round((r.total-r.prevTotal)/r.prevTotal*100)+'%（前月 '+yen(r.prevTotal)+'）</span>')
     : '<span class="stsub">前月データなし</span>';
-  var split='<div class="sd-split"><div class="b"><div class="l">店舗売上</div><div class="v">'+yen(r.storeTotal)+'</div></div><div class="b"><div class="l">デリバリー</div><div class="v">'+yen(r.delivTotal)+'</div></div></div>';
-  var head='<div class="card"><h2 style="font-size:21px;margin-bottom:2px">'+r.name+' '+badge+'</h2><div class="sttot" style="font-size:30px">'+yen(r.total)+'</div><div style="margin-top:4px">'+delta+'</div>'+split+'</div>';
+  var split='<div class="sd-split"><div class="b"><div class="l">店舗売上</div><div class="v">'+yen(r.storeTotal)+'</div></div><div class="b"><div class="l">'+sub2+'</div><div class="v">'+yen(r.delivTotal)+'</div></div></div>';
+  var period=per?('<div class="stsub" style="margin-top:2px">'+per+'分'+(isCurMonth(r.ym)?'':'（当月のデータはまだありません）')+'</div>'):'';
+  var head='<div class="card"><h2 style="font-size:21px;margin-bottom:2px">'+r.name+' '+badge+'</h2>'+period+'<div class="sttot" style="font-size:30px">'+yen(r.total)+'</div><div style="margin-top:4px">'+delta+'</div>'+split+'</div>';
   var it=null; (r.days||[]).forEach(function(x){ if(x.day===STOREDETAIL_DAY) it=x; });
   var dvals = (it&&it.total>0)
-    ? ('<div class="dv-row"><span>合計</span><b>'+yen(it.total)+'</b></div><div class="dv-row"><span>店舗売上</span><b>'+yen(it.store)+'</b></div><div class="dv-row"><span>デリバリー</span><b>'+yen(it.deliv)+'</b></div>')
+    ? ('<div class="dv-row"><span>合計</span><b>'+yen(it.total)+'</b></div><div class="dv-row"><span>店舗売上</span><b>'+yen(it.store)+'</b></div><div class="dv-row"><span>'+sub2+'</span><b>'+yen(it.deliv)+'</b></div>')
     : '<div class="empty-note" style="text-align:center;padding:14px 0">この日は入力がありません</div>';
-  var dayCard='<div class="card"><h2>日別の金額</h2>'+dayNavHtml(STOREDETAIL_DAY, today, "stepDetailDay")+'<div class="dvals">'+dvals+'</div></div>';
-  var chart=(r.days&&r.days.length)?('<div class="card"><h2>日別売上の推移（今月）</h2>'+storeDayChart(r.days)+'<div class="stack-legend" style="margin-top:6px"><span class="lg"><span class="d" style="background:var(--accent)"></span>店舗</span><span class="lg"><span class="d" style="background:var(--ch2)"></span>デリバリー</span></div></div>'):'';
+  var dayCard='<div class="card"><h2>日別の金額</h2>'+dayNavHtml(STOREDETAIL_DAY, bound, "stepDetailDay", r.ym)+'<div class="dvals">'+dvals+'</div></div>';
+  var chart=(r.days&&r.days.length)?('<div class="card"><h2>日別売上の推移（'+(per||"今月")+'）</h2>'+storeDayChart(r.days)+'<div class="stack-legend" style="margin-top:6px"><span class="lg"><span class="d" style="background:var(--accent)"></span>店舗</span><span class="lg"><span class="d" style="background:var(--ch2)"></span>'+sub2+'</span></div></div>'):'';
   elt("storedetail").innerHTML = back + storeChipsHtml(store.id) + head + dayCard + chart;
 }
-function stepDetailDay(delta){ var today=new Date().getDate(); STOREDETAIL_DAY=(delta===0)?today:Math.max(1,Math.min(today,(STOREDETAIL_DAY||today)+delta)); var st=null; STORES.forEach(function(s){ if(s.id===STOREDETAIL_ID)st=s; }); if(st&&STORE_DETAILS[STOREDETAIL_ID]) renderStoreDetailInner(st, STORE_DETAILS[STOREDETAIL_ID]); }
+function stepDetailDay(delta){
+  var r=STORE_DETAILS[STOREDETAIL_ID]||{}; var bound=dayBound(r.ym, r.latestDay);
+  STOREDETAIL_DAY=(delta===0)?bound:Math.max(1,Math.min(bound,(STOREDETAIL_DAY||bound)+delta));
+  var st=null; STORES.forEach(function(s){ if(s.id===STOREDETAIL_ID)st=s; });
+  if(st&&STORE_DETAILS[STOREDETAIL_ID]) renderStoreDetailInner(st, STORE_DETAILS[STOREDETAIL_ID]);
+}
 function showStoreDetail(id, day){
   var store=null; STORES.forEach(function(s){ if(s.id===id) store=s; }); if(!store) return;
   SCREEN="storedetail"; STOREDETAIL_ID=id; STOREDETAIL_DAY=(day!=null?day:null);
@@ -808,7 +859,7 @@ function joeReact(rieki, uriage, jinken){
 function renderChannel(t){
   var chs=[
     {n:"券売機", v:t.kenbai, c:"var(--ch1)"},
-    {n:"anydeli", v:t.anydeli, c:"var(--ch2)"},
+    {n:"キャッシュレス", v:t.anydeli, c:"var(--ch2)"},  /* anydeli列＝キャッシュレス決済（masa 2026-08-01） */
     {n:"クーポン", v:t.coupon, c:"var(--ch3)"},
     {n:"通販等", v:t.tsuhan, c:"var(--ch4)"}
   ];
