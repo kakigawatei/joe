@@ -367,7 +367,23 @@ function fetchMonth(sheet){
     fetchTab(sheet.id,TABS.monthly),
     fetchTab(sheet.id,TABS.shiire).catch(function(){return[];}),
     fetchTab(sheet.id,TABS.jinken).catch(function(){return[];})
-  ]).then(function(a){ return { ym:sheet.ym, label:sheet.label, kaki:a[0], abura:a[1], monthly:a[2], shiire:a[3], jinken:a[4] }; });
+  ]).then(function(a){
+    /* 台帳は月ごとに中身が入れ替わる（8月になれば8月分になる）。
+       設定に書いた ym を信じず、日次タブの実データから何月分かを判定する。
+       ※以前は "2026年7月" が固定表示で、月が変わっても7月のままだった。 */
+    var ym=sheet.ym, label=sheet.label, seen=ymFromRows(a[0])||ymFromRows(a[1]);
+    if(seen){ ym=seen; label=(+seen.slice(0,4))+"年"+(+seen.slice(5,7))+"月"; }
+    return { ym:ym, label:label, kaki:a[0], abura:a[1], monthly:a[2], shiire:a[3], jinken:a[4] };
+  });
+}
+/* 日次タブの行から「何年何月分か」を拾う（一番新しい日付の月） */
+function ymFromRows(rows){
+  var best="";
+  (rows||[]).forEach(function(r){
+    var d=((r&&r[0])||"").trim();
+    if(/^\d{4}-\d{2}-\d{2}$/.test(d) && d>best) best=d;
+  });
+  return best?best.slice(0,7):"";
 }
 /* 仕入経費パース → [{date,store,vendor,zeikomi}] */
 function parseShiire(rows){
