@@ -215,6 +215,7 @@
       <button data-period="today">今日</button>
       <button data-period="week">今週</button>
       <button data-period="month" class="on">今月</button>
+      <button data-period="prev">先月</button>
     </div>
     <div class="seg" id="seg-store">
       <button data-store="all" class="on">全店</button>
@@ -247,7 +248,7 @@
       <div class="card kpi"><div class="k-label" id="k1-l">今月 売上</div><div class="k-val" id="k1-v">—</div><div class="k-sub" id="k1-s"></div></div>
       <div class="card kpi"><div class="k-label" id="k2-l">今月 客数</div><div class="k-val" id="k2-v">—</div><div class="k-sub" id="k2-s"></div></div>
       <div class="card kpi"><div class="k-label" id="k3-l">客単価</div><div class="k-val" id="k3-v">—</div><div class="k-sub" id="k3-s"></div></div>
-      <div class="card kpi"><div class="k-label">今月 総経費率</div><div class="k-val" id="k4-v">—</div><div class="k-sub" id="k4-s"></div></div>
+      <div class="card kpi"><div class="k-label" id="k4-l">今月 総経費率</div><div class="k-val" id="k4-v">—</div><div class="k-sub" id="k4-s"></div></div>
     </div>
     <!-- trend + channel -->
     <div class="grid cols-2">
@@ -443,11 +444,13 @@ function parseMonthly(rows){
   function find(sub){ for(var key in m){ if(key.indexOf("◀前月")<0 && key.indexOf(sub)>=0) return m[key]; } return {kaki:0,abura:0,all:0}; }
   /* ◀前月 行（v3台帳がビルド時に前月の確定値を書き込む）。無い台帳では prev.has=false */
   function findPrev(sub){ for(var key in m){ if(key.indexOf("◀前月")===0 && key.indexOf(sub)>=0) return m[key]; } return null; }
-  var pU=findPrev("売上合計"), pR=findPrev("簡易利益");
+  var pU=findPrev("売上合計"), pR=findPrev("簡易利益"), pS=findPrev("仕入"), pJ=findPrev("人件費");
+  var pYm=""; for(var key2 in m){ var mt=key2.match(/^◀前月実績（([^）]+)）/); if(mt){ pYm=mt[1]; break; } }
   return {
     shiire:find("仕入"), jinken:find("人件費"), sokei:find("総経費"),
     rieki:find("簡易利益"), uriageM:find("売上合計"), kyakuM:find("推定来店"),
-    prev:{ has:!!(pU||pR), uriage:pU||{kaki:0,abura:0,all:0}, rieki:pR||{kaki:0,abura:0,all:0} }
+    prev:{ has:!!(pU||pR), uriage:pU||{kaki:0,abura:0,all:0}, rieki:pR||{kaki:0,abura:0,all:0},
+           shiire:pS||null, jinken:pJ||null, ym:pYm }
   };
 }
 
@@ -517,6 +520,7 @@ function render(){
   if(!DATA) return;
   var daily=dailyFor(STORE);
   var mo=monthlyFor(STORE);
+  if(PERIOD==="prev"){ renderPrevMonth(daily, mo); return; }
   var pr=periodRows(daily);
   var pTotals=sumRange(pr,["uriage","kyaku"]);
   var monthTotals=sumRange(daily,["kenbai","anydeli","coupon","tsuhan","uriage","kyaku"]);
@@ -524,6 +528,7 @@ function render(){
   var pLabel = PERIOD==="today"?"最新日":PERIOD==="week"?"直近7日":"今月";
 
   /* hero: 簡易利益（今月・月次集計ベース） */
+  elt("hero-label").textContent="今月の簡易利益";
   var rieki=mo.rieki;
   var hv=elt("hero-val"); hv.textContent=(rieki<0?"−":"")+yen(Math.abs(rieki)).replace("¥","¥");
   hv.className="big "+(rieki>=0?"pos":"neg");
@@ -541,6 +546,7 @@ function render(){
   elt("k3-v").textContent=yen(tanka); elt("k3-v").className="k-val tnum";
   elt("k3-s").textContent=pLabel+"（売上÷客数）";
   var keihiRitsu = monthTotals.uriage>0 ? mo.sokei/monthTotals.uriage*100 : 0;
+  elt("k4-l").textContent="今月 総経費率";
   elt("k4-v").textContent=keihiRitsu.toFixed(1)+"%"; elt("k4-v").className="k-val tnum";
   elt("k4-s").innerHTML = keihiRitsu>0
     ? '仕入 '+yen(mo.shiire)+' ＋ 人件費 '+yen(mo.jinken)
@@ -562,6 +568,57 @@ function render(){
   renderCost(mo, monthTotals.uriage);
 
   elt("foot").innerHTML = DATA.label+"のデータ／元シートと自動同期（5分毎）<br>簡易利益＝売上−仕入−人件費（台帳の各タブから自動計算・v3）。";
+}
+
+/* 先月ビュー：台帳の「◀前月」確定値（月合計のみ・日別なし） */
+function renderPrevMonth(daily, mo){
+  var m=parseMonthly(DATA.monthly);
+  var pick=function(o){ return STORE==="kaki"?o.kaki:STORE==="abura"?o.abura:o.all; };
+  var has=m.prev && m.prev.has;
+  var uriage=has?pick(m.prev.uriage):0, rieki=has?pick(m.prev.rieki):0;
+  var shi=(has&&m.prev.shiire)?pick(m.prev.shiire):null, jin=(has&&m.prev.jinken)?pick(m.prev.jinken):null;
+  var sokei=(shi!=null&&jin!=null)?shi+jin:uriage-rieki;
+  var ymLabel=m.prev.ym||"先月";
+
+  elt("hero-label").textContent="先月の簡易利益（"+ymLabel+"・確定）";
+  var hv=elt("hero-val"); hv.textContent=(rieki<0?"−":"")+yen(Math.abs(rieki));
+  hv.className="big "+(rieki>=0?"pos":"neg");
+  var hd=elt("hero-delta"); hd.className="delta flat";
+  hd.textContent=has?"台帳の月次確定値（毎月自動記録）":"前月データがまだありません";
+  elt("hero-spark").innerHTML="";
+
+  elt("k1-l").textContent="先月 売上";
+  elt("k1-v").textContent=yen(uriage); elt("k1-v").className="k-val tnum";
+  elt("k1-s").textContent="";
+  elt("k2-l").textContent="先月 客数";
+  elt("k2-v").textContent="—"; elt("k2-v").className="k-val tnum";
+  elt("k2-s").textContent="日別データは当月分のみ";
+  elt("k3-v").textContent="—"; elt("k3-v").className="k-val tnum";
+  elt("k3-s").textContent="客数データなし";
+  var kr=uriage>0?sokei/uriage*100:0;
+  elt("k4-l").textContent="先月 総経費率";
+  elt("k4-v").textContent=(uriage>0?kr.toFixed(1)+"%":"—"); elt("k4-v").className="k-val tnum";
+  elt("k4-s").innerHTML=(shi!=null&&jin!=null)?("仕入 "+yen(shi)+" ＋ 人件費 "+yen(jin)):("総経費 "+yen(sokei));
+
+  var f=elt("joe-face"); if(f) f.src="assets/joe_happy.png";
+  var s=elt("joe-say"); if(s) s.innerHTML="先月（"+ymLabel+"）の確定実績だよ📚 今月と見比べてみてね。";
+
+  var note='<div class="empty-note" style="padding:18px 4px">先月は月合計のみの表示です（日別の内訳は当月分だけ台帳にあります。過去の日別は月次アーカイブへ）。</div>';
+  elt("trend").innerHTML=note;
+  elt("channel").innerHTML=note;
+  elt("dow").innerHTML=note;
+  elt("flash-h").textContent="先月の確定サマリ";
+  elt("flash").innerHTML=
+    '<div class="f"><div class="l">売上</div><div class="v tnum">'+yen(uriage)+'</div></div>'+
+    '<div class="f"><div class="l">総経費</div><div class="v tnum">'+yen(sokei)+'</div></div>'+
+    (shi!=null?'<div class="f"><div class="l">仕入・経費</div><div class="v tnum">'+yen(shi)+'</div></div>':'')+
+    (jin!=null?'<div class="f"><div class="l">人件費</div><div class="v tnum">'+yen(jin)+'</div></div>':'')+
+    '<div class="f"><div class="l">簡易利益</div><div class="v tnum '+(rieki>=0?"pos":"neg")+'">'+(rieki<0?"−":"")+yen(Math.abs(rieki))+'</div></div>'+
+    '<div class="f"><div class="l">利益率</div><div class="v tnum">'+(uriage>0?(rieki/uriage*100).toFixed(1)+"%":"—")+'</div></div>';
+
+  var monthTotals=sumRange(daily,["kenbai","anydeli","coupon","tsuhan","uriage","kyaku"]);
+  renderCost(mo, monthTotals.uriage);
+  elt("foot").innerHTML = DATA.label+"のデータ／「先月」は台帳が毎月自動記録する前月確定値（◀前月行）を表示。";
 }
 
 /* 曜日別 平均売上 */
