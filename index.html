@@ -287,7 +287,7 @@
    </div><!-- /screen-cost -->
 
    <div id="screen-stores" style="display:none;">
-    <div class="card"><h2>店舗別 当月売上一覧 <span id="stores-sub" style="font-weight:500;font-size:13px;color:var(--sub)"></span></h2>
+    <div class="card"><h2>店舗別 売上一覧 <span id="stores-sub" style="font-weight:500;font-size:13px;color:var(--sub)"></span></h2>
       <div id="store-list"><div class="foot">読み込み中…</div></div>
     </div>
     <div class="foot" id="foot3"></div>
@@ -758,9 +758,15 @@ function fetchStoreDetail(store){
       /* 台帳シートは「2026-07」のように月別。データの実日付から何月分かを持たせる */
       s.ym = days.length ? days[days.length-1].date.slice(0,7) : null;
       /* 前月比: 台帳の◀前月行（ホーム読込済みのDATAがあれば） */
+      s.prev=null;
       try{
         if(DATA && DATA.monthly){ var mp=parseMonthly(DATA.monthly);
-          if(mp.prev && mp.prev.has) s.prevTotal = (store.id==="kaki") ? mp.prev.uriage.kaki : mp.prev.uriage.abura; }
+          if(mp.prev && mp.prev.has){ var pt=(store.id==="kaki") ? mp.prev.uriage.kaki : mp.prev.uriage.abura;
+            s.prevTotal = pt;
+            /* 先月ビュー用: 台帳は当月の日別しか持たないので、先月は月合計のみ（◀前月行の確定値） */
+            s.prev={ name:store.name, kind:store.kind, total:pt, storeTotal:pt, delivTotal:0, daysCount:0,
+                     latestDay:0, latestTotal:0, noData:!(pt>0), days:[], ym:mp.prev.ym||null, prevTotal:null, monthOnly:true };
+          } }
       }catch(e){}
       return s;
     });
@@ -778,6 +784,17 @@ function fetchStoreDetail(store){
     var s=summarizeDays(arr); s.name=store.name; s.kind=store.kind; s.days=arr;
     s.prevTotal=(prevS||prevD)?((prevS?prevS.sum:0)+(prevD?prevD.sum:0)):null;
     s.ym=(curS&&curS.ym)||(curD&&curD.ym)||null;
+    /* 先月ビュー用: 前月列の日別まで丸ごと持たせる */
+    s.prev=null;
+    if(prevS||prevD){
+      var dmp={};
+      if(prevS) for(var pd in prevS.byDay){ (dmp[pd]=dmp[pd]||{store:0,deliv:0}).store=prevS.byDay[pd]; }
+      if(prevD) for(var pd in prevD.byDay){ (dmp[pd]=dmp[pd]||{store:0,deliv:0}).deliv=prevD.byDay[pd]; }
+      var arrp=Object.keys(dmp).map(function(pd2){ return {day:+pd2, store:dmp[pd2].store||0, deliv:dmp[pd2].deliv||0, total:(dmp[pd2].store||0)+(dmp[pd2].deliv||0)}; }).sort(function(a,b){return a.day-b.day;});
+      var sp=summarizeDays(arrp); sp.name=store.name; sp.kind=store.kind; sp.days=arrp; sp.prevTotal=null;
+      sp.ym=(prevS&&prevS.ym)||(prevD&&prevD.ym)||null;
+      s.prev=sp;
+    }
     return s;
   });
 }
@@ -796,9 +813,11 @@ function storeDayChart(arr){
   return '<svg viewBox="0 0 '+W+' '+H+'" style="height:184px">'+g+bars+xl+'</svg>';
 }
 var STORES_LOADED=false;
-var STORE_CACHE_KEY="joe_stores_v3";  // v3=ym(何月分か)を持たせた版。古いキャッシュを使わせない
-var STORE_DETAILS={};                 // id -> detail(days含む)
+var STORE_CACHE_KEY="joe_stores_v4";  // v4=prev(先月詳細)を持たせた版。古いキャッシュを使わせない
+var STORE_DETAILS={};                 // id -> detail(days含む・prev=先月分)
 var STORES_VIEW_MODE="cards";         // "cards" | "day"
+var STORES_MONTH="cur";               // "cur"=当月 | "prev"=先月（col店=前月列の日別まで／柿川亭・アブララボ=台帳◀前月の月合計のみ）
+function detFor(id){ var d=STORE_DETAILS[id]; if(!d) return null; return STORES_MONTH==="prev" ? (d.prev||null) : d; }
 var STORES_DAY=null;                  // 一覧・日別モードの選択日
 var STOREDETAIL_ID=null, STOREDETAIL_DAY=null;
 /* ym="YYYY-MM"（データが実際に何月のものか）。未指定なら今月扱い。
@@ -825,7 +844,10 @@ function dayNavHtml(day, maxDay, fn, ym){
 function dayBound(ym, latestDay){ return isCurMonth(ym) ? new Date().getDate() : (latestDay||31); }
 function storeCardHtml(s, r, today){
   var badge='<span class="stbadge '+(s.kind==="FC"?"fc":"chok")+'">'+s.kind+'</span>';
-  if(!r||r.noData||r.total<=0) return '<div class="strow"><div class="stname">'+s.name+' '+badge+'</div><div class="stsub">今月のデータはまだありません</div></div>';
+  if(!r||r.noData||r.total<=0) return '<div class="strow"><div class="stname">'+s.name+' '+badge+'</div><div class="stsub">'+(STORES_MONTH==="prev"?"先月":"今月")+'のデータはまだありません</div></div>';
+  if(r.monthOnly) return '<div class="strow"><div class="stname">'+s.name+' '+badge+(r.ym?' <span class="stwarn">'+ymText(r.ym)+'分</span>':'')+'</div>'
+    +'<div class="sttot">'+yen(r.total)+'</div>'
+    +'<div class="stsub">月合計のみ（台帳の前月確定値・日別なし）</div></div>';
   var avg=r.daysCount>0?Math.round(r.total/r.daysCount):0;
   var sub2=s.sub2||"デリバリー";
   var delivPct=r.total>0?Math.round(r.delivTotal/r.total*100):0;
@@ -842,17 +864,17 @@ function storeCardHtml(s, r, today){
 }
 /* 一覧の「日別」モードで使う年月＝各店のymのうち一番新しいもの */
 function storesYm(){
-  var best=null; STORES.forEach(function(s){ var d=STORE_DETAILS[s.id]; if(d&&d.ym&&(!best||d.ym>best)) best=d.ym; });
+  var best=null; STORES.forEach(function(s){ var d=detFor(s.id); if(d&&d.ym&&(!best||d.ym>best)) best=d.ym; });
   return best;
 }
 function storesDayRows(day){
-  var rows=STORES.map(function(s){ var det=STORE_DETAILS[s.id]; var badge='<span class="stbadge '+(s.kind==="FC"?"fc":"chok")+'">'+s.kind+'</span>';
-    if(!det) return '<div class="dayrow"><div class="n">'+s.name+' '+badge+'</div><div class="v none">…</div></div>';
+  var rows=STORES.map(function(s){ var det=detFor(s.id); var badge='<span class="stbadge '+(s.kind==="FC"?"fc":"chok")+'">'+s.kind+'</span>';
+    if(!det) return '<div class="dayrow"><div class="n">'+s.name+' '+badge+'</div><div class="v none">'+(STORE_DETAILS[s.id]?"日別なし":"…")+'</div></div>';
     var it=null; (det.days||[]).forEach(function(x){ if(x.day===day) it=x; });
-    var v = (it&&it.total>0) ? '<div class="v">'+yen(it.total)+'</div>' : '<div class="v none">入力なし</div>';
+    var v = (it&&it.total>0) ? '<div class="v">'+yen(it.total)+'</div>' : '<div class="v none">'+(det.monthOnly?"日別なし":"入力なし")+'</div>';
     return '<div class="dayrow clk" style="cursor:pointer" onclick="showStoreDetail(\''+s.id+'\','+day+')"><div class="n">'+s.name+' '+badge+'</div>'+v+'</div>';
   }).join("");
-  var g=0; STORES.forEach(function(s){ var det=STORE_DETAILS[s.id]; if(det)(det.days||[]).forEach(function(x){ if(x.day===day)g+=x.total; }); });
+  var g=0; STORES.forEach(function(s){ var det=detFor(s.id); if(det)(det.days||[]).forEach(function(x){ if(x.day===day)g+=x.total; }); });
   rows+='<div class="dayrow"><div class="n">'+STORES.length+'店 合計</div><div class="v">'+yen(g)+'</div></div>';
   return rows;
 }
@@ -860,25 +882,29 @@ function paintStoreBody(){
   var body=elt("store-body"); if(!body) return;
   var today=new Date().getDate();
   if(STORES_VIEW_MODE==="day"){
-    var mx=0; STORES.forEach(function(s){ var d=STORE_DETAILS[s.id]; if(d&&d.latestDay>mx)mx=d.latestDay; });
+    var mx=0; STORES.forEach(function(s){ var d=detFor(s.id); if(d&&d.latestDay>mx)mx=d.latestDay; });
     var ym=storesYm(), bound=dayBound(ym, mx);
     if(STORES_DAY==null){ STORES_DAY=mx||bound; }
     body.innerHTML = dayNavHtml(STORES_DAY, bound, "stepStoresDay", ym) + '<div style="margin-top:6px">'+storesDayRows(STORES_DAY)+'</div>';
   } else {
-    var g=0; var cards=STORES.map(function(s){ var d=STORE_DETAILS[s.id]; if(d&&d.total>0)g+=d.total;
-      return d?storeCardHtml(s,d,today):'<div class="strow"><div class="stname">'+s.name+'</div><div class="stsub">読み込み中…</div></div>'; }).join("");
+    var g=0; var cards=STORES.map(function(s){ var loaded=STORE_DETAILS[s.id]; var d=detFor(s.id); if(d&&d.total>0)g+=d.total;
+      if(!loaded) return '<div class="strow"><div class="stname">'+s.name+'</div><div class="stsub">読み込み中…</div></div>';
+      if(!d) return '<div class="strow"><div class="stname">'+s.name+' <span class="stbadge '+(s.kind==="FC"?"fc":"chok")+'">'+s.kind+'</span></div><div class="stsub">先月のデータがありません</div></div>';
+      return storeCardHtml(s,d,today); }).join("");
     body.innerHTML = cards + '<div class="strow stgrand"><div class="stname">'+STORES.length+'店 合計</div><div class="sttot">'+yen(g)+'</div></div>';
   }
 }
 function paintStoreScreen(){
   var e=elt("stores-sub"); var ym=storesYm();
-  if(e) e.textContent = ym ? ("（"+ymText(ym)+"分・自動判定）") : "（読み込み中）";
-  elt("store-list").innerHTML='<div class="seg"><button class="'+(STORES_VIEW_MODE==="cards"?"on":"")+'" onclick="setStoreMode(\'cards\')">店舗別</button><button class="'+(STORES_VIEW_MODE==="day"?"on":"")+'" onclick="setStoreMode(\'day\')">日別</button></div><div id="store-body"></div>';
+  if(e) e.textContent = ym ? ("（"+(STORES_MONTH==="prev"?"先月・":"当月・")+ymText(ym)+"分・自動判定）") : "（読み込み中）";
+  elt("store-list").innerHTML='<div class="seg"><button class="'+(STORES_MONTH==="cur"?"on":"")+'" onclick="setStoreMonth(\'cur\')">当月</button><button class="'+(STORES_MONTH==="prev"?"on":"")+'" onclick="setStoreMonth(\'prev\')">先月</button></div>'
+    +'<div class="seg" style="margin-top:8px"><button class="'+(STORES_VIEW_MODE==="cards"?"on":"")+'" onclick="setStoreMode(\'cards\')">店舗別</button><button class="'+(STORES_VIEW_MODE==="day"?"on":"")+'" onclick="setStoreMode(\'day\')">日別</button></div><div id="store-body"></div>';
   paintStoreBody();
 }
 function setStoreMode(m){ STORES_VIEW_MODE=m; STORES_DAY=null; paintStoreScreen(); }
+function setStoreMonth(m){ STORES_MONTH=m; STORES_DAY=null; paintStoreScreen(); }
 function stepStoresDay(delta){
-  var mx=0; STORES.forEach(function(s){ var d=STORE_DETAILS[s.id]; if(d&&d.latestDay>mx)mx=d.latestDay; });
+  var mx=0; STORES.forEach(function(s){ var d=detFor(s.id); if(d&&d.latestDay>mx)mx=d.latestDay; });
   var bound=dayBound(storesYm(), mx);
   STORES_DAY = (delta===0)?bound:Math.max(1,Math.min(bound,(STORES_DAY||bound)+delta)); paintStoreBody();
 }
@@ -911,10 +937,11 @@ function renderStoreDetailInner(store, r){
   elt("storedetail").innerHTML = back + storeChipsHtml(store.id) + head + dayCard + chart;
 }
 function stepDetailDay(delta){
-  var r=STORE_DETAILS[STOREDETAIL_ID]||{}; var bound=dayBound(r.ym, r.latestDay);
+  var r=detFor(STOREDETAIL_ID)||{}; var bound=dayBound(r.ym, r.latestDay);
   STOREDETAIL_DAY=(delta===0)?bound:Math.max(1,Math.min(bound,(STOREDETAIL_DAY||bound)+delta));
   var st=null; STORES.forEach(function(s){ if(s.id===STOREDETAIL_ID)st=s; });
-  if(st&&STORE_DETAILS[STOREDETAIL_ID]) renderStoreDetailInner(st, STORE_DETAILS[STOREDETAIL_ID]);
+  var d=detFor(STOREDETAIL_ID);
+  if(st&&d) renderStoreDetailInner(st, d);
 }
 function showStoreDetail(id, day){
   var store=null; STORES.forEach(function(s){ if(s.id===id) store=s; }); if(!store) return;
@@ -922,9 +949,11 @@ function showStoreDetail(id, day){
   elt("screen-home").style.display="none"; elt("screen-cost").style.display="none"; elt("screen-stores").style.display="none"; elt("screen-storedetail").style.display="block";
   [].forEach.call(document.getElementById("bottomnav").children,function(b){ b.classList.toggle("on", b.dataset.screen==="stores"); });
   window.scrollTo(0,0);
-  if(STORE_DETAILS[id]) renderStoreDetailInner(store, STORE_DETAILS[id]);
+  var d0=detFor(id);
+  if(d0) renderStoreDetailInner(store, d0);
+  else if(STORE_DETAILS[id]) elt("storedetail").innerHTML='<button class="backbtn" onclick="showScreen(\'stores\')">‹ 店舗一覧へ</button><div class="foot">先月のデータがありません</div>';
   else elt("storedetail").innerHTML='<div class="foot">読み込み中…</div>';
-  fetchStoreDetail(store).then(function(r){ STORE_DETAILS[id]=r; try{localStorage.setItem(STORE_CACHE_KEY,JSON.stringify(STORE_DETAILS));}catch(e){} if(SCREEN==="storedetail"&&STOREDETAIL_ID===id) renderStoreDetailInner(store,r); })
+  fetchStoreDetail(store).then(function(r){ STORE_DETAILS[id]=r; try{localStorage.setItem(STORE_CACHE_KEY,JSON.stringify(STORE_DETAILS));}catch(e){} if(SCREEN==="storedetail"&&STOREDETAIL_ID===id){ var d1=detFor(id); if(d1) renderStoreDetailInner(store,d1); } })
     .catch(function(e){ if(!STORE_DETAILS[id]) elt("storedetail").innerHTML='<div class="card"><div class="empty-note">読み込みに失敗しました。'+(""+e)+'</div></div>'; });
 }
 function showScreen(name){
